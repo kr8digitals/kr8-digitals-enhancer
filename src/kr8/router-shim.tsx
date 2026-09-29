@@ -16,7 +16,7 @@ import {
 } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 
-type NavOpts = { replace?: boolean; state?: unknown };
+type NavOpts = { replace?: boolean | undefined; state?: unknown };
 
 export function useLocation() {
   const loc = useRouterState({ select: (s) => s.location });
