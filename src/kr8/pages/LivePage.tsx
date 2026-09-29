@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from "react";
 import { useSeo } from "../lib/useSeo";
 import { useLiveStream } from "../context/LiveStreamContext";

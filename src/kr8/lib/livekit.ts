@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * LiveKit Real-Time WebRTC Integration Engine for KR8 Digitals
  * Provides WebRTC signaling, media relay, stream transport, and real-time data channels

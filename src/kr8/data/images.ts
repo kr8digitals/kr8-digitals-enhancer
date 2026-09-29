@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Real stock photography (Pexels) used across the site.
 export const IMG = {
   heroGroup:

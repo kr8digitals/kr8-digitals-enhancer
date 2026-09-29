@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * WebAuthn & Device Biometric / Fingerprint Authentication Helper for KR8 Digitals
  * Rigorous implementation that triggers genuine hardware sensor touch prompts

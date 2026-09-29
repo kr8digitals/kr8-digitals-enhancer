@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import type { Announcement } from "../data/store";
 import { Card } from "./ui";

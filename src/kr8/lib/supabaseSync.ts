@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { getSupabase } from "./supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {

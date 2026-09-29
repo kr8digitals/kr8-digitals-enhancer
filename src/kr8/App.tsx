@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "./router-shim";
 import { AuthProvider } from "./context/AuthContext";

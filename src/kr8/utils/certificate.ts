@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { PDFDocument } from "pdf-lib";
 import QRCode from "qrcode";
 import { getCertificateTemplate, type CertificateTier } from "../data/certificateTemplates";

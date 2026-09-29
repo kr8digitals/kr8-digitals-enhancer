@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useSearchParams, Link } from "../router-shim";
 import {

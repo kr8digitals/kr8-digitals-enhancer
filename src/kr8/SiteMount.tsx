@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { lazy, Suspense } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 

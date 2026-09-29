@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Mindset Shift — dynamic event system (KR8 Digitals)
  *

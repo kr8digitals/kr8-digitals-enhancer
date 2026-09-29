@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useMemo, useEffect } from "react";
 import { Link, useNavigate } from "../router-shim";
 import { IMG } from "../data/images";

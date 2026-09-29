@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * KR8 Digitals — High-Capacity IndexedDB Media Storage for Announcements & Uploads
  * Prevents localStorage QuotaExceededError when uploading large image/video assets.

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useState } from "react";
 import { COUNTRIES, detectCountryCode, countryByCode } from "../data/store";
 

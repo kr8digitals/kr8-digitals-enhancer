@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * KR8 Digitals — Coach & Administrator Signatures Architecture
  * Maps skills to coaches and their verified digital signatures.

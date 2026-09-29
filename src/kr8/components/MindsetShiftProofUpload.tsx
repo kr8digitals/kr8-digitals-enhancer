@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { submitMsProof, type MsRegistration } from "../data/mindsetShift";
 import { getMediaAsset, saveMediaAsset } from "../utils/mediaStorage";

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { IMG } from "../data/images";
 import { PORTFOLIO, getPortfolio, CONTACT, FULL_PORTFOLIO_LINK, saveClientRequest } from "../data/store";

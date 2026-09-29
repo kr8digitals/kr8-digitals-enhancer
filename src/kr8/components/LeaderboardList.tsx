@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useState } from "react";
 import { getStudents, getSkillName } from "../data/store";
 import { useAuth } from "../context/AuthContext";

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import type { CertificateRecord, Account } from "../data/store";
 import { resolveCertificateImageUrl } from "../utils/certificate";

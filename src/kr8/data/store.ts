@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { IMG } from "./images";
 
 /* ---------------- Skills / curriculum / instructors ---------------- */

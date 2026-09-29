@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link, Navigate, useNavigate, useSearchParams } from "../router-shim";

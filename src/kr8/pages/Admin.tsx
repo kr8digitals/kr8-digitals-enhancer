@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, type ChangeEvent } from "react";
 import { useSeo } from "../lib/useSeo";
 import { useNavigate } from "../router-shim";

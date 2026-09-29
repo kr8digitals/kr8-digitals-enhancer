@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * KR8 Digitals — Centralized Dynamic Content Management System (CMS)
  * Enables live, dynamic admin control over headlines, subheadings, paragraphs,

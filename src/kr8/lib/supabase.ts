@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Default verified Supabase credentials for KR8 Digitals

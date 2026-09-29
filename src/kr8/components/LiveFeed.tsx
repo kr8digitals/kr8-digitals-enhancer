@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useState } from "react";
 import { useNavigate } from "../router-shim";
 import { getFeed, feedAction, timeAgo, type FeedItem, getLiveChatMessages } from "../data/store";

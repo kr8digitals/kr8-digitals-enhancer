@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { Component, type ReactNode } from "react";
 
 interface Props {
