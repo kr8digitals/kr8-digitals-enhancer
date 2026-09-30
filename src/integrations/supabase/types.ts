@@ -14,7 +14,432 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      accounts: {
+        Row: {
+          attendance_accepted: number | null
+          avatar: string | null
+          cert_recognition: string | null
+          cert_tier: string | null
+          country: string | null
+          created_at: string
+          dob: string | null
+          email: string | null
+          executive_role: string | null
+          graduated: boolean | null
+          id: string
+          name: string | null
+          password: string | null
+          phone: string | null
+          points: number | null
+          referrals: number | null
+          skill: string | null
+          submissions: number | null
+          type: string
+          vip: boolean | null
+        }
+        Insert: {
+          attendance_accepted?: number | null
+          avatar?: string | null
+          cert_recognition?: string | null
+          cert_tier?: string | null
+          country?: string | null
+          created_at?: string
+          dob?: string | null
+          email?: string | null
+          executive_role?: string | null
+          graduated?: boolean | null
+          id: string
+          name?: string | null
+          password?: string | null
+          phone?: string | null
+          points?: number | null
+          referrals?: number | null
+          skill?: string | null
+          submissions?: number | null
+          type?: string
+          vip?: boolean | null
+        }
+        Update: {
+          attendance_accepted?: number | null
+          avatar?: string | null
+          cert_recognition?: string | null
+          cert_tier?: string | null
+          country?: string | null
+          created_at?: string
+          dob?: string | null
+          email?: string | null
+          executive_role?: string | null
+          graduated?: boolean | null
+          id?: string
+          name?: string | null
+          password?: string | null
+          phone?: string | null
+          points?: number | null
+          referrals?: number | null
+          skill?: string | null
+          submissions?: number | null
+          type?: string
+          vip?: boolean | null
+        }
+        Relationships: []
+      }
+      activity_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_name: string | null
+          created_at: string
+          details: Json | null
+          id: string
+          path: string | null
+          target: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          path?: string | null
+          target?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          path?: string | null
+          target?: string | null
+        }
+        Relationships: []
+      }
+      live_chat: {
+        Row: {
+          created_at: number | null
+          id: string
+          is_pinned: boolean | null
+          sender_badge: string | null
+          sender_id: string | null
+          sender_name: string | null
+          sender_role: string | null
+          stream_id: string | null
+          text: string | null
+        }
+        Insert: {
+          created_at?: number | null
+          id: string
+          is_pinned?: boolean | null
+          sender_badge?: string | null
+          sender_id?: string | null
+          sender_name?: string | null
+          sender_role?: string | null
+          stream_id?: string | null
+          text?: string | null
+        }
+        Update: {
+          created_at?: number | null
+          id?: string
+          is_pinned?: boolean | null
+          sender_badge?: string | null
+          sender_id?: string | null
+          sender_name?: string | null
+          sender_role?: string | null
+          stream_id?: string | null
+          text?: string | null
+        }
+        Relationships: []
+      }
+      live_streams: {
+        Row: {
+          access_key: string | null
+          assigned_tasks: Json | null
+          category: string | null
+          created_at: string
+          description: string | null
+          ended_at: number | null
+          host_avatar: string | null
+          host_id: string | null
+          host_name: string | null
+          id: string
+          is_live: boolean | null
+          peak_viewers: number | null
+          pinned_notice: string | null
+          poster_url: string | null
+          quality: string | null
+          recognized_participants: Json | null
+          started_at: number | null
+          title: string | null
+          video_url: string | null
+          viewer_count: number | null
+          viewers: Json | null
+          visibility: string | null
+        }
+        Insert: {
+          access_key?: string | null
+          assigned_tasks?: Json | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          ended_at?: number | null
+          host_avatar?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id: string
+          is_live?: boolean | null
+          peak_viewers?: number | null
+          pinned_notice?: string | null
+          poster_url?: string | null
+          quality?: string | null
+          recognized_participants?: Json | null
+          started_at?: number | null
+          title?: string | null
+          video_url?: string | null
+          viewer_count?: number | null
+          viewers?: Json | null
+          visibility?: string | null
+        }
+        Update: {
+          access_key?: string | null
+          assigned_tasks?: Json | null
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          ended_at?: number | null
+          host_avatar?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id?: string
+          is_live?: boolean | null
+          peak_viewers?: number | null
+          pinned_notice?: string | null
+          poster_url?: string | null
+          quality?: string | null
+          recognized_participants?: Json | null
+          started_at?: number | null
+          title?: string | null
+          video_url?: string | null
+          viewer_count?: number | null
+          viewers?: Json | null
+          visibility?: string | null
+        }
+        Relationships: []
+      }
+      mindset_shift_event: {
+        Row: {
+          config: Json | null
+          edition: string | null
+          id: string
+          updated_at: number | null
+        }
+        Insert: {
+          config?: Json | null
+          edition?: string | null
+          id: string
+          updated_at?: number | null
+        }
+        Update: {
+          config?: Json | null
+          edition?: string | null
+          id?: string
+          updated_at?: number | null
+        }
+        Relationships: []
+      }
+      mindset_shift_registrations: {
+        Row: {
+          admin_note: string | null
+          area_to_improve: string | null
+          biggest_challenge: string | null
+          created_at: string | null
+          debt_experience: string | null
+          deleted_at: string | null
+          edition: string | null
+          email: string | null
+          financial_situation: string | null
+          full_name: string | null
+          has_financial_goal: boolean | null
+          heard_about: string | null
+          hoping_to_learn: string | null
+          id: string
+          location: string | null
+          money_question: string | null
+          phone: string | null
+          proof_data: string | null
+          proof_submitted_at: string | null
+          status: string | null
+          updated_at: string | null
+          verified_at: string | null
+          verified_by: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          admin_note?: string | null
+          area_to_improve?: string | null
+          biggest_challenge?: string | null
+          created_at?: string | null
+          debt_experience?: string | null
+          deleted_at?: string | null
+          edition?: string | null
+          email?: string | null
+          financial_situation?: string | null
+          full_name?: string | null
+          has_financial_goal?: boolean | null
+          heard_about?: string | null
+          hoping_to_learn?: string | null
+          id: string
+          location?: string | null
+          money_question?: string | null
+          phone?: string | null
+          proof_data?: string | null
+          proof_submitted_at?: string | null
+          status?: string | null
+          updated_at?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          admin_note?: string | null
+          area_to_improve?: string | null
+          biggest_challenge?: string | null
+          created_at?: string | null
+          debt_experience?: string | null
+          deleted_at?: string | null
+          edition?: string | null
+          email?: string | null
+          financial_situation?: string | null
+          full_name?: string | null
+          has_financial_goal?: boolean | null
+          heard_about?: string | null
+          hoping_to_learn?: string | null
+          id?: string
+          location?: string | null
+          money_question?: string | null
+          phone?: string | null
+          proof_data?: string | null
+          proof_submitted_at?: string | null
+          status?: string | null
+          updated_at?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
+      stream_chat_messages: {
+        Row: {
+          created_at: number | null
+          id: string
+          is_pinned: boolean | null
+          is_private: boolean | null
+          recipient_id: string | null
+          recipient_name: string | null
+          sender_id: string | null
+          sender_name: string | null
+          sender_role: string | null
+          stream_id: string | null
+          text: string | null
+        }
+        Insert: {
+          created_at?: number | null
+          id: string
+          is_pinned?: boolean | null
+          is_private?: boolean | null
+          recipient_id?: string | null
+          recipient_name?: string | null
+          sender_id?: string | null
+          sender_name?: string | null
+          sender_role?: string | null
+          stream_id?: string | null
+          text?: string | null
+        }
+        Update: {
+          created_at?: number | null
+          id?: string
+          is_pinned?: boolean | null
+          is_private?: boolean | null
+          recipient_id?: string | null
+          recipient_name?: string | null
+          sender_id?: string | null
+          sender_name?: string | null
+          sender_role?: string | null
+          stream_id?: string | null
+          text?: string | null
+        }
+        Relationships: []
+      }
+      streams: {
+        Row: {
+          access_key: string | null
+          category: string | null
+          chat_permission: string | null
+          created_at: string
+          description: string | null
+          host_avatar: string | null
+          host_id: string | null
+          host_name: string | null
+          id: string
+          is_live: boolean | null
+          is_locked: boolean | null
+          is_recording: boolean | null
+          is_suspended: boolean | null
+          livekit_room_name: string | null
+          spotlight_participant_id: string | null
+          started_at: number | null
+          title: string | null
+          viewer_count: number | null
+          viewers: Json | null
+          visibility: string | null
+        }
+        Insert: {
+          access_key?: string | null
+          category?: string | null
+          chat_permission?: string | null
+          created_at?: string
+          description?: string | null
+          host_avatar?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id: string
+          is_live?: boolean | null
+          is_locked?: boolean | null
+          is_recording?: boolean | null
+          is_suspended?: boolean | null
+          livekit_room_name?: string | null
+          spotlight_participant_id?: string | null
+          started_at?: number | null
+          title?: string | null
+          viewer_count?: number | null
+          viewers?: Json | null
+          visibility?: string | null
+        }
+        Update: {
+          access_key?: string | null
+          category?: string | null
+          chat_permission?: string | null
+          created_at?: string
+          description?: string | null
+          host_avatar?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id?: string
+          is_live?: boolean | null
+          is_locked?: boolean | null
+          is_recording?: boolean | null
+          is_suspended?: boolean | null
+          livekit_room_name?: string | null
+          spotlight_participant_id?: string | null
+          started_at?: number | null
+          title?: string | null
+          viewer_count?: number | null
+          viewers?: Json | null
+          visibility?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
