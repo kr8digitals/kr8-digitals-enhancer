@@ -1,30 +1,24 @@
 // @ts-nocheck
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Default verified Supabase credentials for KR8 Digitals
-const DEFAULT_SUPABASE_URL = "https://yuvslnjoutjohxgsxprb.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_1okkWO6Qwn7mmuvbFLZdmQ_6SZb0uo0";
+// KR8 Digitals database (Lovable Cloud)
+const DEFAULT_SUPABASE_URL = "https://zvdkzldiabedjsxhwvbm.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_tjWargPs1GiV1boWO1dtRg_7T8Curil";
 
-// Retrieve keys from environment, browser localStorage, or default production configuration
 const getSupabaseEnv = () => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
-  let localUrl = "";
-  let localKey = "";
-
+  const envKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
   if (typeof window !== "undefined") {
     try {
-      localUrl = localStorage.getItem("kr8_supabase_url") || "";
-      localKey = localStorage.getItem("kr8_supabase_anon_key") || "";
+      // Old saved overrides pointed at the retired database
+      localStorage.removeItem("kr8_supabase_url");
+      localStorage.removeItem("kr8_supabase_anon_key");
     } catch {
-      // Storage access blocked or restricted
+      /* ignore */
     }
   }
-
-  const url = (localUrl || envUrl || DEFAULT_SUPABASE_URL).trim();
-  const anonKey = (localKey || envKey || DEFAULT_SUPABASE_ANON_KEY).trim();
-
+  const url = (envUrl || DEFAULT_SUPABASE_URL).trim();
+  const anonKey = (envKey || DEFAULT_SUPABASE_ANON_KEY).trim();
   return { url, anonKey };
 };
 

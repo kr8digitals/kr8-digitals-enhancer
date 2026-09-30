@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { findStudent, type Account } from "../data/store";
+import { logActivity } from "../lib/activityLog";
 
 type AuthCtx = {
   student: Account | null; // active account (student or tribe)
@@ -153,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = getOrCreateDeviceToken();
     const now = Date.now();
     setStudent(s);
+    logActivity("sign_in", { actorId: s.id, actorName: s.name });
     setDeviceToken(token);
     try {
       localStorage.setItem("kr8_current", JSON.stringify(s));
@@ -173,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = () => {
+    if (student) logActivity("sign_out", { actorId: student.id, actorName: student.name });
     setStudent(null);
     try {
       localStorage.removeItem("kr8_current");
