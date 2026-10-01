@@ -152,6 +152,54 @@ export type Database = {
         }
         Relationships: []
       }
+      live_rooms: {
+        Row: {
+          access_key: string | null
+          description: string | null
+          ended_at: string | null
+          host_id: string | null
+          host_name: string | null
+          id: string
+          is_live: boolean
+          is_recording: boolean
+          mode: string
+          started_at: string
+          title: string
+          visibility: string
+          waiting_room: boolean
+        }
+        Insert: {
+          access_key?: string | null
+          description?: string | null
+          ended_at?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id: string
+          is_live?: boolean
+          is_recording?: boolean
+          mode?: string
+          started_at?: string
+          title: string
+          visibility?: string
+          waiting_room?: boolean
+        }
+        Update: {
+          access_key?: string | null
+          description?: string | null
+          ended_at?: string | null
+          host_id?: string | null
+          host_name?: string | null
+          id?: string
+          is_live?: boolean
+          is_recording?: boolean
+          mode?: string
+          started_at?: string
+          title?: string
+          visibility?: string
+          waiting_room?: boolean
+        }
+        Relationships: []
+      }
       live_streams: {
         Row: {
           access_key: string | null
@@ -326,6 +374,117 @@ export type Database = {
           verified_at?: string | null
           verified_by?: string | null
           whatsapp?: string | null
+        }
+        Relationships: []
+      }
+      recordings: {
+        Row: {
+          created_at: string
+          duration_seconds: number | null
+          file_path: string
+          host_name: string | null
+          id: string
+          is_hidden: boolean
+          room_id: string | null
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          duration_seconds?: number | null
+          file_path: string
+          host_name?: string | null
+          id?: string
+          is_hidden?: boolean
+          room_id?: string | null
+          title: string
+        }
+        Update: {
+          created_at?: string
+          duration_seconds?: number | null
+          file_path?: string
+          host_name?: string | null
+          id?: string
+          is_hidden?: boolean
+          room_id?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
+      room_admissions: {
+        Row: {
+          created_at: string
+          id: string
+          room_id: string
+          status: string
+          user_id: string
+          user_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          room_id: string
+          status?: string
+          user_id: string
+          user_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          room_id?: string
+          status?: string
+          user_id?: string
+          user_name?: string | null
+        }
+        Relationships: []
+      }
+      room_messages: {
+        Row: {
+          attachment_name: string | null
+          attachment_path: string | null
+          attachment_type: string | null
+          created_at: string
+          id: string
+          is_deleted: boolean
+          is_pinned: boolean
+          reactions: Json
+          read_by: Json
+          reply_to: string | null
+          room_id: string
+          sender_id: string | null
+          sender_name: string | null
+          text: string | null
+        }
+        Insert: {
+          attachment_name?: string | null
+          attachment_path?: string | null
+          attachment_type?: string | null
+          created_at?: string
+          id?: string
+          is_deleted?: boolean
+          is_pinned?: boolean
+          reactions?: Json
+          read_by?: Json
+          reply_to?: string | null
+          room_id: string
+          sender_id?: string | null
+          sender_name?: string | null
+          text?: string | null
+        }
+        Update: {
+          attachment_name?: string | null
+          attachment_path?: string | null
+          attachment_type?: string | null
+          created_at?: string
+          id?: string
+          is_deleted?: boolean
+          is_pinned?: boolean
+          reactions?: Json
+          read_by?: Json
+          reply_to?: string | null
+          room_id?: string
+          sender_id?: string | null
+          sender_name?: string | null
+          text?: string | null
         }
         Relationships: []
       }
