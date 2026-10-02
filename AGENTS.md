@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- The Live experience uses one Lovable Cloud/LiveKit room system; legacy stream overlays must not be rendered because duplicate live states confuse users.
