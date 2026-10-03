@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useSeo } from "../lib/useSeo";
 import { useSearchParams } from "../router-shim";
+import "../live/live.css";
 import ShareRoom from "../live/ShareRoom";
 import { supabase } from "@/integrations/supabase/client";
 import { createRoom, getRoomToken } from "@/lib/live.functions";
