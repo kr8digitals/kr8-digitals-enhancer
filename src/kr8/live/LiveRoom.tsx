@@ -1,4 +1,5 @@
 // @ts-nocheck
+import ShareRoom from "./ShareRoom";
 import "@livekit/components-styles";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -240,9 +241,7 @@ function RoomInner({ room, me, isHost, onLeave }) {
           </div>
           <p className="text-[11px] text-[#8e82a8]">{room.mode === "broadcast" ? "Broadcast" : "Meeting"} · Host: {room.host_name}{isHost && room.access_key ? ` · Invite key: ${room.access_key}` : ""}</p>
         </div>
-        {isHost && (
-          <button onClick={() => navigator.clipboard?.writeText(`${location.origin}/live?room=${room.id}`)} className="rounded-full bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20">Copy link</button>
-        )}
+        <ShareRoom room={room} withKey={isHost} />
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1 p-2"><Stage mode={room.mode} />{layer}</div>

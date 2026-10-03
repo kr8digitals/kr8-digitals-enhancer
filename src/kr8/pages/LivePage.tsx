@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { useSeo } from "../lib/useSeo";
 import { useSearchParams } from "../router-shim";
+import "../live/live.css";
+import ShareRoom from "../live/ShareRoom";
 import { supabase } from "@/integrations/supabase/client";
 import { createRoom, getRoomToken } from "@/lib/live.functions";
 import { useLiveIdentity, signedFileUrl, fmtDuration } from "../live/useLiveIdentity";
@@ -206,7 +208,7 @@ export default function LivePage() {
     } catch (error) { alert(error.message); }
   };
 
-  useEffect(() => { if (roomParam && me.id && !session) join(roomParam); }, [roomParam, me.id, me.name]);
+  useEffect(() => { if (roomParam && me.id && !session) { const k = params.get("key") || ""; if (k) setAccessKey(k); join(roomParam, k); } }, [roomParam, me.id, me.name]);
   useEffect(() => {
     if (gate?.status !== "waiting") return;
     const channel = supabase.channel(`wait-${gate.roomId}-${me.id}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "room_admissions", filter: `room_id=eq.${gate.roomId}` }, (payload) => {
@@ -258,6 +260,7 @@ export default function LivePage() {
                         <h3 className="live-serif mt-2 text-2xl">{room.title}</h3>
                         <p className="live-meta mt-2 line-clamp-2 text-sm">{room.description || (room.mode === "meeting" ? "Join the table. Your camera, voice, and ideas are welcome." : "Watch the stage and join the conversation in live chat.")}</p>
                         <button onClick={() => enter(room.id)} className="live-primary mt-5 w-full sm:w-auto">Join live room <ArrowRight size={17} /></button>
+                        <ShareRoom room={room} className="mt-3" />
                       </div>
                     </article>
                   ))}
