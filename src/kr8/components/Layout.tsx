@@ -4,6 +4,7 @@ import { Outlet, useLocation } from "../router-shim";
 import Navbar from "./Navbar";
 import { logActivity } from "../lib/activityLog";
 import Footer from "./Footer";
+import SiteLiveBanner from "./SiteLiveBanner";
 import FollowPopup from "./FollowPopup";
 
 export default function Layout() {
@@ -15,6 +16,7 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <SiteLiveBanner />
       <Navbar />
 
       <main className="flex-1">
