@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { supabase as __sb } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
@@ -23,7 +24,17 @@ export default function Navbar() {
   const [bell, setBell] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const { student, signOut, notifications, clearNotifications } = useAuth();
-  const { isLive, activeStream, openStage, canHost } = useLiveStream();
+  const { canHost } = useLiveStream();
+  const [liveRooms, setLiveRooms] = useState([]);
+  useEffect(() => {
+    const load = () => __sb.from("live_rooms").select("id,visibility").eq("is_live", true).order("started_at", { ascending: false }).then(({ data }) => setLiveRooms(data || []));
+    load();
+    const ch = __sb.channel("nav-live").on("postgres_changes", { event: "*", schema: "public", table: "live_rooms" }, load).subscribe();
+    return () => { __sb.removeChannel(ch); };
+  }, []);
+  const isLive = liveRooms.length > 0;
+  const activeStream = isLive ? { visibility: liveRooms[0].visibility, viewerCount: liveRooms.length } : null;
+  const openStage = () => nav(isLive && liveRooms.length === 1 ? `/live?room=${liveRooms[0].id}` : "/live");
   const nav = useNavigate();
 
   // Listen to open signin event
