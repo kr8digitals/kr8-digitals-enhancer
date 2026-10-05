@@ -50,6 +50,7 @@ import { hydrateAccountsFromSupabase } from "../lib/supabaseSync";
 import SignatureManager from "../components/admin/SignatureManager";
 import GranularPermissionsManager from "../components/admin/GranularPermissionsManager";
 import AnnouncementManager from "../components/admin/AnnouncementManager";
+import LiveControlCenter from "../components/admin/LiveControlCenter";
 import MindsetShiftTab from "../components/admin/MindsetShiftTab";
 
 const ATTENDANCE_PW = "KR8@Atd2026";
@@ -606,7 +607,7 @@ export default function Admin() {
             {tab === "Home" && <HomeManager onOpenVideos={() => setTab("Testimonial Videos")} />}
             {tab === "Academy" && <AcademyManager onOpenVideos={() => setTab("Testimonial Videos")} />}
             {tab === "Testimonial Videos" && <TestimonialVideosManager />}
-            {tab === "Live Streams & Replays" && <LiveStreamsManager />}
+            {tab === "Live Streams & Replays" && <LiveControlCenter />}
             {tab === "Agency" && <AgencyManager />}
             {tab === "Gallery Archive" && <GalleryManager />}
             {tab === "Student Management" && <StudentManager students={students} onRefreshStudents={(fresh) => setStudents(fresh)} />}
