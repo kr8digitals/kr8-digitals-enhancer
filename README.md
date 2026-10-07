@@ -1,14 +1,18 @@
-# Welcome to your Lovable project
+# KR8 Website Enhancer
+
+@connector:github:"GitHub API" fetch KR8-Digitals-Website- repo, i want to add new features to that website. don't break or change anything yet
 
 This project was built with [Lovable](https://lovable.dev).
 
+**Live app**: https://kr8-digitals-enhancer.lovable.app
+
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/88acd018-1f8c-4ec7-bb4a-af0b41b3a47d).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +24,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
