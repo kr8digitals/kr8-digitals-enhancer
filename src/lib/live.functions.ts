@@ -9,7 +9,7 @@ import { z } from "zod";
 async function run<T>(action: string, data: unknown): Promise<T> {
   if (process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
     const { liveAdminActions } = await import("./live-admin.server");
-    return (await (liveAdminActions as Record<string, (d: unknown) => Promise<unknown>>)[action](data)) as T;
+    return (await (liveAdminActions as Record<string, (d: unknown) => Promise<unknown>>)[action]!(data)) as T;
   }
   const url = process.env["LIVE_ADMIN_URL"];
   if (!url) throw new Error("Live service is not configured");
