@@ -28,7 +28,7 @@ async function run<T>(action: string, data: unknown): Promise<T> {
   return body.result as T;
 }
 
-type RoomRow = Record<string, unknown> & { id: string; title: string };
+type RoomRow = import("@/integrations/supabase/types").Database["public"]["Tables"]["live_rooms"]["Row"];
 type TokenResult =
   | { status: "ended" }
   | { status: "needs_key" }
