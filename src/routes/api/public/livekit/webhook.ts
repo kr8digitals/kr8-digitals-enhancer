@@ -1,30 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 // LiveKit webhook: keeps room status in sync (e.g. when everyone leaves).
+// Without the service role key, forwards raw body + signature to LIVE_ADMIN_URL.
 export const Route = createFileRoute("/api/public/livekit/webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["LIVEKIT_API_KEY"];
-        const secret = process.env["LIVEKIT_API_SECRET"];
-        if (!key || !secret) return new Response("Not configured", { status: 500 });
         const body = await request.text();
-        const { WebhookReceiver } = await import("livekit-server-sdk");
-        let event;
-        try {
-          event = await new WebhookReceiver(key, secret).receive(body, request.headers.get("Authorization") ?? "");
-        } catch {
-          return new Response("Invalid signature", { status: 401 });
+        const auth = request.headers.get("Authorization") ?? "";
+        if (process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+          const { handleLiveKitWebhook } = await import("@/lib/live-admin.server");
+          return handleLiveKitWebhook(body, auth);
         }
-        const roomId = event.room?.name;
-        if (roomId && event.event === "room_finished") {
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-          await supabaseAdmin
-            .from("live_rooms")
-            .update({ is_live: false, ended_at: new Date().toISOString(), is_recording: false })
-            .eq("id", roomId);
-        }
-        return new Response("ok");
+        const target = process.env["LIVE_ADMIN_URL"];
+        if (!target) return new Response("Not configured", { status: 500 });
+        const u = new URL(target);
+        u.searchParams.set("webhook", "livekit");
+        const res = await fetch(u, {
+          method: "POST",
+          headers: { "Content-Type": request.headers.get("Content-Type") ?? "application/webhook+json", "x-livekit-authorization": auth },
+          body,
+        });
+        return new Response(await res.text(), { status: res.status });
       },
     },
   },

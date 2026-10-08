@@ -3,36 +3,45 @@ import { z } from "zod";
 
 // Live rooms (LiveKit). Hosts are founder / co-founder accounts in the database.
 // NOTE: site sign-in is still in-browser, so the caller's account id is trusted as sent.
+// With SUPABASE_SERVICE_ROLE_KEY: runs src/lib/live-admin.server.ts directly.
+// Without it (e.g. Vercel): forwards to LIVE_ADMIN_URL (/api/public/live-admin on Lovable).
 
-async function admin() {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin;
+async function run<T>(action: string, data: unknown): Promise<T> {
+  if (process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+    const { liveAdminActions } = await import("./live-admin.server");
+    return (await (liveAdminActions as Record<string, (d: unknown) => Promise<unknown>>)[action](data)) as T;
+  }
+  const url = process.env["LIVE_ADMIN_URL"];
+  if (!url) throw new Error("Live service is not configured");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...(data as object), action }),
+  });
+  let body: { result?: T; error?: string } = {};
+  try {
+    body = await res.json();
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok || body.error !== undefined) throw new Error(body.error || `Live service error (${res.status})`);
+  return body.result as T;
 }
 
-async function isHost(userId: string) {
-  if (!userId) return false;
-  const db = await admin();
-  const { data } = await db.from("accounts").select("type").eq("id", userId).maybeSingle();
-  return !!data && (data.type === "founder" || data.type === "co-founder");
-}
+type RoomRow = Record<string, unknown> & { id: string; title: string };
+type TokenResult =
+  | { status: "ended" }
+  | { status: "needs_key" }
+  | { status: "waiting" }
+  | { status: "denied" }
+  | { status: "ok"; token: string; url: string; isHost: boolean; room: RoomRow };
+type Ok = { ok: boolean };
 
-function lkEnv() {
-  const url = process.env["LIVEKIT_URL"];
-  const key = process.env["LIVEKIT_API_KEY"];
-  const secret = process.env["LIVEKIT_API_SECRET"];
-  if (!url || !key || !secret) throw new Error("Video service is not configured");
-  return { url, key, secret, httpUrl: url.replace(/^wss:/, "https:").replace(/^ws:/, "http:") };
-}
-
-async function roomService() {
-  const { RoomServiceClient } = await import("livekit-server-sdk");
-  const e = lkEnv();
-  return new RoomServiceClient(e.httpUrl, e.key, e.secret);
-}
+const hostAction = z.object({ userId: z.string().min(1).max(200), roomId: z.string().min(1).max(100) });
 
 export const checkHost = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ userId: z.string().max(200) }).parse(d))
-  .handler(async ({ data }) => ({ isHost: await isHost(data.userId) }));
+  .handler(async ({ data }) => run<{ isHost: boolean }>("checkHost", data));
 
 export const createRoom = createServerFn({ method: "POST" })
   .inputValidator((d) =>
@@ -48,34 +57,7 @@ export const createRoom = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) => {
-    if (!(await isHost(data.userId))) throw new Error("Only hosts can start a live session");
-    const db = await admin();
-    const id = "kr8-" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36);
-    const access_key =
-      data.visibility === "private" ? "KR8-" + Math.random().toString(36).slice(2, 8).toUpperCase() : null;
-    const { error } = await db.from("live_rooms").insert({
-      id,
-      title: data.title,
-      description: data.description ?? null,
-      mode: data.mode,
-      host_id: data.userId,
-      host_name: data.userName,
-      visibility: data.visibility,
-      access_key,
-      waiting_room: data.waitingRoom,
-      is_live: true,
-    });
-    if (error) throw new Error(error.message);
-    await db.from("activity_log").insert({
-      actor_id: data.userId,
-      actor_name: data.userName,
-      action: "live_started",
-      target: data.title,
-      details: { room: id, mode: data.mode },
-    });
-    return { id, accessKey: access_key };
-  });
+  .handler(async ({ data }) => run<{ id: string; accessKey: string | null }>("createRoom", data));
 
 export const getRoomToken = createServerFn({ method: "POST" })
   .inputValidator((d) =>
@@ -88,79 +70,13 @@ export const getRoomToken = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data }) => {
-    const db = await admin();
-    const { data: room } = await db.from("live_rooms").select("*").eq("id", data.roomId).maybeSingle();
-    if (!room || !room.is_live) return { status: "ended" as const };
-    const host = room.host_id === data.userId || (await isHost(data.userId));
-
-    if (!host) {
-      if (room.visibility === "private" && (data.accessKey || "").trim().toUpperCase() !== room.access_key) {
-        return { status: "needs_key" as const };
-      }
-      if (room.waiting_room) {
-        const { data: adm } = await db
-          .from("room_admissions")
-          .select("status")
-          .eq("room_id", room.id)
-          .eq("user_id", data.userId)
-          .maybeSingle();
-        if (!adm) {
-          await db.from("room_admissions").insert({ room_id: room.id, user_id: data.userId, user_name: data.userName });
-          return { status: "waiting" as const };
-        }
-        if (adm.status === "denied") return { status: "denied" as const };
-        if (adm.status !== "admitted") return { status: "waiting" as const };
-      }
-    }
-
-    const { AccessToken } = await import("livekit-server-sdk");
-    const e = lkEnv();
-    const canPublish = host || room.mode === "meeting";
-    const at = new AccessToken(e.key, e.secret, {
-      identity: data.userId,
-      name: data.userName,
-      ttl: "6h",
-      metadata: JSON.stringify({ role: host ? "host" : room.mode === "broadcast" ? "viewer" : "participant" }),
-    });
-    at.addGrant({
-      room: room.id,
-      roomJoin: true,
-      roomAdmin: host,
-      canPublish,
-      canSubscribe: true,
-      canPublishData: true,
-      canUpdateOwnMetadata: true,
-    });
-    await db.from("activity_log").insert({
-      actor_id: data.userId,
-      actor_name: data.userName,
-      action: "live_joined",
-      target: room.title,
-      details: { room: room.id },
-    });
-    return { status: "ok" as const, token: await at.toJwt(), url: e.url, isHost: host, room };
-  });
-
-const hostAction = z.object({ userId: z.string().min(1).max(200), roomId: z.string().min(1).max(100) });
-
-async function assertRoomHost(userId: string, roomId: string) {
-  const db = await admin();
-  const { data: room } = await db.from("live_rooms").select("*").eq("id", roomId).maybeSingle();
-  if (!room) throw new Error("Room not found");
-  if (room.host_id !== userId && !(await isHost(userId))) throw new Error("Not allowed");
-  return { db, room };
-}
+  .handler(async ({ data }) => run<TokenResult>("getRoomToken", data));
 
 export const setAdmission = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     hostAction.extend({ targetId: z.string().max(200), status: z.enum(["admitted", "denied"]) }).parse(d),
   )
-  .handler(async ({ data }) => {
-    const { db } = await assertRoomHost(data.userId, data.roomId);
-    await db.from("room_admissions").update({ status: data.status }).eq("room_id", data.roomId).eq("user_id", data.targetId);
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("setAdmission", data));
 
 export const moderateParticipant = createServerFn({ method: "POST" })
   .inputValidator((d) =>
@@ -168,95 +84,34 @@ export const moderateParticipant = createServerFn({ method: "POST" })
       .extend({ targetId: z.string().max(200), action: z.enum(["mute", "remove", "make_speaker", "make_viewer"]) })
       .parse(d),
   )
-  .handler(async ({ data }) => {
-    await assertRoomHost(data.userId, data.roomId);
-    const rs = await roomService();
-    if (data.action === "remove") {
-      await rs.removeParticipant(data.roomId, data.targetId);
-    } else if (data.action === "mute") {
-      const p = await rs.getParticipant(data.roomId, data.targetId);
-      for (const t of p.tracks) {
-        if (!t.muted) await rs.mutePublishedTrack(data.roomId, data.targetId, t.sid, true);
-      }
-    } else {
-      const speaker = data.action === "make_speaker";
-      await rs.updateParticipant(data.roomId, data.targetId, {
-        metadata: JSON.stringify({ role: speaker ? "speaker" : "viewer" }),
-        permission: { canPublish: speaker, canSubscribe: true, canPublishData: true },
-      });
-    }
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("moderateParticipant", data));
 
 export const endRoom = createServerFn({ method: "POST" })
   .inputValidator((d) => hostAction.parse(d))
-  .handler(async ({ data }) => {
-    const { db, room } = await assertRoomHost(data.userId, data.roomId);
-    try {
-      const rs = await roomService();
-      await rs.deleteRoom(data.roomId);
-    } catch (e) {
-      console.error("deleteRoom", e);
-    }
-    await db.from("live_rooms").update({ is_live: false, ended_at: new Date().toISOString(), is_recording: false }).eq("id", data.roomId);
-    await db.from("activity_log").insert({ actor_id: data.userId, action: "live_ended", target: room.title, details: { room: room.id } });
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("endRoom", data));
 
 export const setRecording = createServerFn({ method: "POST" })
   .inputValidator((d) => hostAction.extend({ on: z.boolean() }).parse(d))
-  .handler(async ({ data }) => {
-    const { db } = await assertRoomHost(data.userId, data.roomId);
-    await db.from("live_rooms").update({ is_recording: data.on }).eq("id", data.roomId);
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("setRecording", data));
 
 export const saveRecording = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     hostAction.extend({ filePath: z.string().max(500), durationSeconds: z.number().int().min(0) }).parse(d),
   )
-  .handler(async ({ data }) => {
-    const { db, room } = await assertRoomHost(data.userId, data.roomId);
-    await db.from("recordings").insert({
-      room_id: room.id,
-      title: room.title,
-      host_name: room.host_name,
-      file_path: data.filePath,
-      duration_seconds: data.durationSeconds,
-    });
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("saveRecording", data));
 
 export const listRoomParticipants = createServerFn({ method: "POST" })
   .inputValidator((d) => hostAction.parse(d))
-  .handler(async ({ data }) => {
-    await assertRoomHost(data.userId, data.roomId);
-    try {
-      const rs = await roomService();
-      const ps = await rs.listParticipants(data.roomId);
-      return ps.map((p) => ({ identity: p.identity, name: p.name, joinedAt: Number(p.joinedAt) }));
-    } catch {
-      return [];
-    }
-  });
+  .handler(async ({ data }) =>
+    run<{ identity: string; name: string; joinedAt: number }[]>("listRoomParticipants", data),
+  );
 
 export const hideRecording = createServerFn({ method: "POST" })
   .inputValidator((d) => z.object({ userId: z.string().max(200), recordingId: z.string().uuid() }).parse(d))
-  .handler(async ({ data }) => {
-    if (!(await isHost(data.userId))) throw new Error("Not allowed");
-    const db = await admin();
-    await db.from("recordings").update({ is_hidden: true }).eq("id", data.recordingId);
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("hideRecording", data));
 
 export const moderateMessage = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z.object({ userId: z.string().max(200), messageId: z.string().uuid(), action: z.enum(["delete", "pin", "unpin"]) }).parse(d),
   )
-  .handler(async ({ data }) => {
-    if (!(await isHost(data.userId))) throw new Error("Not allowed");
-    const db = await admin();
-    const patch = data.action === "delete" ? { is_deleted: true } : { is_pinned: data.action === "pin" };
-    await db.from("room_messages").update(patch).eq("id", data.messageId);
-    return { ok: true };
-  });
+  .handler(async ({ data }) => run<Ok>("moderateMessage", data));
