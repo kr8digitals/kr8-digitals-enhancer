@@ -101,13 +101,13 @@ export type SkillCompat = {
 };
 
 const DEFAULT_FALLBACK: SkillCompat[] = [
-  { key: "graphic", name: "Graphic Design", suffix: "GDVFD", whatsapp: "https://chat.whatsapp.com/G5mSP8JeelfELvnljpgSJ8", available: true, regOpen: true, snippet: "8-week graphic design.", icon: "palette", instructor: null, curriculum: [], criteria: "" },
-  { key: "video", name: "Video Editing & Animation", suffix: "VEVFD", whatsapp: "https://chat.whatsapp.com/GYVKMA6CLPC2mnG356u8jT", available: true, regOpen: true, snippet: "8-week video editing.", icon: "video", instructor: null, curriculum: [], criteria: "" },
-  { key: "web", name: "Website Development", suffix: "WDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week website development.", icon: "code", instructor: null, curriculum: [], criteria: "" },
-  { key: "frontend", name: "Front-End Development", suffix: "FEDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week frontend.", icon: "code", instructor: null, curriculum: [], criteria: "" },
-  { key: "content_creation", name: "Content Creation", suffix: "CCVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: true, regOpen: true, snippet: "8-week creator programme.", icon: "video", instructor: null, curriculum: [], criteria: "" },
-  { key: "smm", name: "Social Media Management", suffix: "SMMVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: true, regOpen: true, snippet: "8-week SMM.", icon: "mobile", instructor: null, curriculum: [], criteria: "" },
-  { key: "marketing", name: "Digital Marketing", suffix: "DMVFD", whatsapp: "https://chat.whatsapp.com/Fah586y8c26KkUfRhAe8i6", available: true, regOpen: true, snippet: "8-week marketing.", icon: "chart", instructor: null, curriculum: [], criteria: "" },
+  { key: "graphic", name: "Graphic Design", suffix: "GDVFD", whatsapp: "https://chat.whatsapp.com/G5mSP8JeelfELvnljpgSJ8", available: true, regOpen: true, snippet: "8-week graphic design — live drills, real tutors.", icon: "palette", instructor: null, curriculum: [], criteria: "" },
+  { key: "video", name: "Video Editing & Animation", suffix: "VEVFD", whatsapp: "https://chat.whatsapp.com/GYVKMA6CLPC2mnG356u8jT", available: true, regOpen: true, snippet: "8-week video editing — cinematic storytelling.", icon: "video", instructor: null, curriculum: [], criteria: "" },
+  { key: "web", name: "Website Development", suffix: "WDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week website development — ship live sites.", icon: "code", instructor: null, curriculum: [], criteria: "" },
+  { key: "frontend", name: "Front-End Development", suffix: "FEDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week frontend — React, performance, conversion.", icon: "code", instructor: null, curriculum: [], criteria: "" },
+  { key: "content_creation", name: "Content Creation", suffix: "CCVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: false, regOpen: false, snippet: "8-week creator programme — launching next cohort.", icon: "video", instructor: null, curriculum: [], criteria: "" },
+  { key: "smm", name: "Social Media Management", suffix: "SMMVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: false, regOpen: false, snippet: "8-week SMM — launching next cohort.", icon: "mobile", instructor: null, curriculum: [], criteria: "" },
+  { key: "marketing", name: "Digital Marketing", suffix: "DMVFD", whatsapp: "https://chat.whatsapp.com/Fah586y8c26KkUfRhAe8i6", available: false, regOpen: false, snippet: "8-week marketing — launching next cohort.", icon: "chart", instructor: null, curriculum: [], criteria: "" },
 ];
 
 export function getSkillsFromCache(): SkillCompat[] {

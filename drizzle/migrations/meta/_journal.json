@@ -6,35 +6,35 @@
       "idx": 0,
       "version": "7",
       "when": 1790732889851,
-      "tag": "0000_kr8_core_schema",
+      "tag": "0002_production_secure_fresh_start",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
       "when": 1790813741233,
-      "tag": "0001_live_rooms_chat_recordings",
+      "tag": "0003_leaderboard_activity_announcements",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
       "when": 1790813741234,
-      "tag": "0002_production_secure_fresh_start",
+      "tag": "0004_round4_skills_settings_webauthn",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
       "when": 1790813741235,
-      "tag": "0003_leaderboard_activity_announcements",
+      "tag": "0005_round5_admin_full_control",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
       "when": 1790813741236,
-      "tag": "0004_round4_skills_settings_webauthn",
+      "tag": "0006_fix_admin_rls_graduation_performance",
       "breakpoints": true
     }
   ]

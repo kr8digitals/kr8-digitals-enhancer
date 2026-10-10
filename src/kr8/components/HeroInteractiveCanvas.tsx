@@ -31,7 +31,12 @@ export default function HeroInteractiveCanvas() {
       "rgba(255, 255, 255, ", // white
     ];
 
-    const particleCount = Math.min(Math.floor((width * height) / 22000), 45);
+    const isMobile = window.innerWidth < 768 || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (isMobile) {
+      // Skip heavy canvas on mobile / reduced motion for performance
+      return;
+    }
+    const particleCount = Math.min(Math.floor((width * height) / 40000), 25);
     const particles: Particle[] = [];
 
     for (let i = 0; i < particleCount; i++) {
@@ -71,6 +76,9 @@ export default function HeroInteractiveCanvas() {
     document.addEventListener("mouseleave", handleMouseLeave);
 
     let time = 0;
+    let paused = false;
+    const handleVisibility = () => { paused = document.hidden; };
+    document.addEventListener('visibilitychange', handleVisibility);
     const raf = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
       ? window.requestAnimationFrame.bind(window)
       : (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as unknown as number;
@@ -79,6 +87,7 @@ export default function HeroInteractiveCanvas() {
       : (id: number) => clearTimeout(id as unknown as NodeJS.Timeout);
 
     const render = () => {
+      if (paused) { animationFrameId = raf(render); return; }
       time += 0.01;
       ctx.clearRect(0, 0, width, height);
 
@@ -142,6 +151,7 @@ export default function HeroInteractiveCanvas() {
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseleave", handleMouseLeave);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 

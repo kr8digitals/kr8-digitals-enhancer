@@ -83,31 +83,36 @@ function GuestHome() {
   const [liveCounts, setLiveCounts] = useState({ students: 1247, tribe: 3185, projects: 127 });
 
   useEffect(() => {
+    let mounted = true;
     const fetchCounts = async () => {
       try {
-        const { data: overview } = await supabase.rpc('admin_overview');
-        if (overview) {
+        // Use public_counts RPC (anon allowed, fast) — never admin_overview for public page
+        const { data: pub } = await supabase.rpc('public_counts');
+        if (pub && mounted) {
           setLiveCounts({
-            students: Math.max(0, overview.total_students || 1247),
-            tribe: Math.max(0, (overview.total_students || 0) * 2.5 + 500),
-            projects: Math.max(0, overview.certificates_issued ? Math.floor(overview.certificates_issued * 0.8) + 80 : 127),
+            students: Math.max(0, (pub as any).total_students || 1247),
+            tribe: Math.max(0, Math.floor(((pub as any).total_students || 1247) * 2.5) + 500),
+            projects: Math.max(0, ((pub as any).total_portfolio || 6) + 100),
           });
-        } else {
-          const { count: profilesCount } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
-          const { count: portfolioCount } = await supabase.from('agency_portfolio').select('id', { count: 'exact', head: true });
-          setLiveCounts({
-            students: Math.max(0, profilesCount || 1247),
-            tribe: Math.max(0, (profilesCount || 1247) * 2.5),
-            projects: Math.max(0, portfolioCount ? portfolioCount + 100 : 127),
-          });
+          return;
         }
+        // Fallback: direct public counts (cached, head only)
+        const { count: profilesCount } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
+        const { count: portfolioCount } = await supabase.from('agency_portfolio').select('id', { count: 'exact', head: true });
+        if (!mounted) return;
+        setLiveCounts({
+          students: Math.max(0, profilesCount || 1247),
+          tribe: Math.max(0, Math.floor((profilesCount || 1247) * 2.5)),
+          projects: Math.max(0, (portfolioCount || 6) + 100),
+        });
       } catch {
         // Keep defaults, never negative
       }
     };
     fetchCounts();
-    const iv = setInterval(fetchCounts, 60000);
-    return () => clearInterval(iv);
+    // Poll every 5 minutes for public page (not 60s) — performance
+    const iv = setInterval(fetchCounts, 300000);
+    return () => { mounted = false; clearInterval(iv); };
   }, []);
 
   useEffect(() => {

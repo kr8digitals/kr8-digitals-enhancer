@@ -128,9 +128,14 @@ function GuestAcademy() {
                     {displayInstructor ? (
                       <>
                         <InstructorPhoto src={displayInstructor.photo} name={displayInstructor.name} />
-                        <div><p className="text-xs text-[#8a7ba8]">Instructor</p><p className="text-sm font-semibold text-white">{displayInstructor.name}</p></div>
+                        <div><p className="text-xs text-[#8a7ba8]">Instructor</p><p className="text-sm font-semibold text-white">{displayInstructor.name}</p><p className="text-[11px] text-[#6a5b82] line-clamp-1">{displayInstructor.bio}</p></div>
                       </>
-                    ) : (<p className="text-sm text-[#8a7ba8]">Instructor: KR8 Master Practitioner</p>)}
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-gradient-pink flex items-center justify-center text-white font-bold text-xs">KR8</div>
+                        <div><p className="text-xs text-[#8a7ba8]">Instructor</p><p className="text-sm font-semibold text-white">KR8 Senior Team</p></div>
+                      </div>
+                    )}
                   </div>
                   <p className={`mt-3 text-xs font-semibold ${getSkillRegistration(s.key) ? "text-green-400" : "text-yellow-300"}`}>{getSkillRegistration(s.key) ? "● Registration open" : "● Registration closed"}</p>
                   <div className="mt-4 flex gap-2">

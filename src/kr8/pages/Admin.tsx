@@ -285,14 +285,13 @@ export default function Admin() {
   );
 }
 
-// ----------------- OVERVIEW -----------------
+// ----------------- OVERVIEW - FIXED: handles both old/new keys, resilient, less polling -----------------
 function OverviewTab({ setTab, currentUserId }: { setTab: (t: string) => void; currentUserId: string }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setErr(null);
     try {
       const { data: overview, error } = await supabase.rpc('admin_overview');
@@ -307,7 +306,7 @@ function OverviewTab({ setTab, currentUserId }: { setTab: (t: string) => void; c
 
   useEffect(() => {
     load();
-    const iv = setInterval(load, 60000);
+    const iv = setInterval(load, 120000); // 2 min, not 60s — performance
     return () => clearInterval(iv);
   }, [load]);
 
@@ -315,20 +314,29 @@ function OverviewTab({ setTab, currentUserId }: { setTab: (t: string) => void; c
   if (err) return <ErrorState err={err} retry={load} />;
   if (!data) return <EmptyState msg="No overview data" />;
 
+  // Resilient key access — supports both old and new migration outputs
+  const get = (keys: string[], fallback = 0) => {
+    for (const k of keys) {
+      const v = (data as any)[k];
+      if (v !== undefined && v !== null) return v;
+    }
+    return fallback;
+  };
+
   const tiles = [
-    { label: "Total Students", value: data.total_students, link: "Student Management" },
-    { label: "New Today", value: data.new_today, link: "Student Management" },
-    { label: "New Last 7d", value: data.new_7d, link: "Student Management" },
-    { label: "Graduated", value: data.graduated, link: "Graduation & Certificates" },
-    { label: "Certificates Issued", value: data.certificates_issued, link: "Graduation & Certificates" },
-    { label: "Failed Cert Emails", value: data.failed_emails, link: "Graduation & Certificates" },
-    { label: "Unconfirmed Sign-ups", value: data.unconfirmed, link: "Student Management" },
-    { label: "Attendance Waiting", value: data.attendance_waiting, link: "Attendance Review" },
-    { label: "Live Rooms Now", value: data.live_rooms_now, link: "Live Streams & Replays" },
-    { label: "Suspended Accounts", value: data.suspended_accounts, link: "Moderation" },
-    { label: "Appeals Waiting", value: data.appeals_waiting, link: "Moderation" },
-    { label: "Testimonials Waiting", value: data.testimonials_waiting, link: "Testimonial Videos" },
-    { label: "Gallery Waiting", value: data.gallery_waiting, link: "Gallery Archive" },
+    { label: "Total Students", value: get(['total_students']), link: "Student Management" },
+    { label: "New Today", value: get(['new_today','newToday']), link: "Student Management" },
+    { label: "New Last 7d", value: get(['new_7d','new_last_7_days','new_7d','new_last_7d']), link: "Student Management" },
+    { label: "Graduated", value: get(['graduated']), link: "Graduation & Certificates" },
+    { label: "Certificates Issued", value: get(['certificates_issued']), link: "Graduation & Certificates" },
+    { label: "Failed Cert Emails", value: get(['failed_emails','failed_certificate_emails']), link: "Graduation & Certificates" },
+    { label: "Unconfirmed Sign-ups", value: get(['unconfirmed','unconfirmed_signups']), link: "Student Management" },
+    { label: "Attendance Waiting", value: get(['attendance_waiting']), link: "Attendance Review" },
+    { label: "Live Rooms Now", value: get(['live_rooms_now']), link: "Live Streams & Replays" },
+    { label: "Suspended Accounts", value: get(['suspended_accounts']), link: "Moderation" },
+    { label: "Appeals Waiting", value: get(['appeals_waiting']), link: "Moderation" },
+    { label: "Testimonials Waiting", value: get(['testimonials_waiting']), link: "Testimonial Videos" },
+    { label: "Gallery Waiting", value: get(['gallery_waiting']), link: "Gallery Archive" },
   ];
 
   return (
@@ -817,7 +825,7 @@ function BlogTab({ currentUserId }: { currentUserId: string }) {
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('blog_posts').select('id,title,excerpt,cover_image_url,published,created_at').order('created_at', { ascending: false }).range((page - 1) * 25, page * 25 - 1);
+      const { data, error } = await supabase.from('blog_posts').select('id,title,excerpt,content,cover_image_url,published,created_at').order('created_at', { ascending: false }).range((page - 1) * 25, page * 25 - 1);
       if (error) throw error;
       setPosts(data || []);
       const { data: comms } = await supabase.from('blog_comments').select('id,post_id,content,author_id,created_at').order('created_at', { ascending: false }).limit(25);
@@ -825,6 +833,18 @@ function BlogTab({ currentUserId }: { currentUserId: string }) {
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [page]);
+
+  const editPost = async (p: any) => {
+    // Fetch full content if not already loaded
+    try {
+      if (!p.content) {
+        const { data } = await supabase.from('blog_posts').select('content').eq('id', p.id).maybeSingle();
+        if (data?.content) p = { ...p, content: data.content };
+      }
+    } catch {}
+    setEditing(p);
+    setForm({ title: p.title, excerpt: p.excerpt || "", content: p.content || "", cover_image_url: p.cover_image_url || "", published: !!p.published });
+  };
 
   const handleUpload = async (e: any) => {
     const file = e.target.files?.[0];
@@ -915,7 +935,7 @@ function BlogTab({ currentUserId }: { currentUserId: string }) {
               <div className="min-w-0"><p className="text-xs font-bold text-white truncate">{p.title} {p.published ? <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px]">PUBLISHED</span> : <span className="ml-1 px-1.5 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">DRAFT</span>}</p><p className="text-[11px] text-[#8a7ba8] truncate">{p.excerpt}</p></div>
               <div className="flex gap-1 shrink-0">
                 <button onClick={() => togglePublish(p)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">{p.published ? 'Unpublish' : 'Publish'}</button>
-                <button onClick={() => { setEditing(p); setForm({ title: p.title, excerpt: p.excerpt || "", content: "", cover_image_url: p.cover_image_url || "", published: !!p.published }); }} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">Edit</button>
+                <button onClick={() => editPost(p)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">Edit</button>
                 <button onClick={() => del(p.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300">Del</button>
               </div>
             </div>
@@ -1418,7 +1438,7 @@ function AttendanceReviewTab({ currentUserId }: { currentUserId: string }) {
   );
 }
 
-// ----------------- GRADUATION -----------------
+// ----------------- GRADUATION - FIXED: Uses server functions, not direct RLS-blocked inserts -----------------
 function GraduationTab({ currentUserId, isFounder }: { currentUserId: string; isFounder: boolean }) {
   const [students, setStudents] = useState<any[]>([]);
   const [certs, setCerts] = useState<any[]>([]);
@@ -1434,16 +1454,31 @@ function GraduationTab({ currentUserId, isFounder }: { currentUserId: string; is
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
-  const issueFn = useServerFn((() => import('@/lib/certificate.functions').then(m => m.issueCertificate)) as any);
+  const [total, setTotal] = useState(0);
 
-  // Actually use dynamic import workaround - we will use server fn directly via supabase rpc? For simplicity, use existing issue flow via supabaseAdmin? But we have server fn.
-  // We'll call via fetch to /api? Instead, use supabase.from directly for demo, but real should use server fn. We'll use supabase RPC style via certificate.functions file already has server fn.
-  // To avoid complexity, we will use the server fn imported as any.
+  const issueFn = useServerFn((() => import('@/lib/certificate.functions').then(m => m.issueCertificate)) as any);
+  const withdrawFn = useServerFn((() => import('@/lib/certificate.functions').then(m => m.withdrawCertificate)) as any);
+  const resendFn = useServerFn((() => import('@/lib/certificate.functions').then(m => m.resendCertificateEmail)) as any);
 
   const load = async () => {
     try {
-      const { data: studs } = await supabase.from('profiles').select('id,kr8_id,name,email,skill,graduated').order('created_at', { ascending: false }).range((page - 1) * 25, page * 25 - 1);
-      if (studs) setStudents(studs);
+      // Use admin_list_students RPC for proper pagination and total count
+      const { data: studs, error: studErr } = await supabase.rpc('admin_list_students', {
+        p_search: search || null,
+        p_skill: null,
+        p_status: null,
+        p_limit: 25,
+        p_offset: (page - 1) * 25,
+      });
+      if (studErr) {
+        // Fallback to direct profiles if RPC fails
+        const { data: fallback } = await supabase.from('profiles').select('id,kr8_id,name,email,skill,graduated').order('created_at', { ascending: false }).range((page - 1) * 25, page * 25 - 1);
+        if (fallback) { setStudents(fallback); setTotal(fallback.length < 25 && page === 1 ? fallback.length : page * 25 + 25); }
+      } else if (studs) {
+        setStudents(studs);
+        if (studs.length > 0 && (studs[0] as any).total_count) setTotal((studs[0] as any).total_count);
+        else setTotal(studs.length < 25 && page === 1 ? studs.length : page * 25 + 25);
+      }
       const { data: allCerts } = await supabase.from('certificates').select('id,certificate_code,kr8_id,student_name,skill_name,tier,status,email_sent_at,email_failure_reason,issued_at').order('issued_at', { ascending: false }).limit(25);
       if (allCerts) setCerts(allCerts);
       const { data: failed } = await supabase.from('certificates').select('id,certificate_code,kr8_id,student_name,email_failure_reason').not('email_failure_reason', 'is', null).limit(25);
@@ -1452,6 +1487,7 @@ function GraduationTab({ currentUserId, isFounder }: { currentUserId: string; is
   };
 
   useEffect(() => { load(); }, [page]);
+  const doSearch = () => { setPage(1); load(); };
 
   const openFor = (s: any) => {
     setSelected(s);
@@ -1466,151 +1502,156 @@ function GraduationTab({ currentUserId, isFounder }: { currentUserId: string; is
   const issue = async () => {
     if (!selected) return;
     if (!editedName.trim()) { setMsg("Student name editable required"); return; }
+    if (editedName.trim().length < 2) { setMsg("Name must be at least 2 characters"); return; }
     setBusy(true);
     setMsg(null);
     try {
-      // Use server function issueCertificate
-      const { issueCertificate } = await import('@/lib/certificate.functions');
-      const fn = issueCertificate as any;
-      // Need to call via useServerFn? We'll use direct supabaseAdmin via client? For now call RPC via supabase functions? Simpler: insert directly then log
-      // To keep RLS safe, we will use supabase.from insert (founder has permission via RLS? But we have server fn for security)
-      // We'll attempt to call the server fn via fetch if available, fallback to direct insert
-      const certCode = `CERT-KR8-${selected.kr8_id}-${skillKey.toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
-      const { data: cert, error } = await supabase.from('certificates').insert({
-        certificate_code: certCode,
-        student_id: selected.id,
-        kr8_id: selected.kr8_id,
-        student_name: editedName.trim(),
-        formatted_name: editedName.trim().toUpperCase(),
-        skill: skillKey,
-        skill_name: skillName,
-        tier,
-        additional_notes: notes || null,
-        issued_at: new Date().toISOString(),
-        issued_by: currentUserId,
-        status: 'active',
-      }).select().single();
-      if (error) throw error;
-      await supabase.from('profiles').update({ graduated: true, cert_tier: tier, ...(alsoUpdateProfile ? { name: editedName.trim() } : {}) }).eq('id', selected.id);
-      await logActivity(currentUserId, 'certificate_issued', selected.kr8_id, { certificate_code: certCode, tier });
-      setMsg(`Certificate issued for ${editedName.trim()} (${selected.kr8_id}). Code: ${certCode}`);
+      const result = await issueFn({
+        data: {
+          studentId: selected.id,
+          kr8Id: selected.kr8_id,
+          skill: skillKey,
+          skillName: skillName,
+          tier,
+          additionalNotes: notes || undefined,
+          editedName: editedName.trim(),
+          alsoUpdateProfile,
+        }
+      });
+      const certCode = (result as any)?.certificate?.certificate_code || 'issued';
+      const isNew = (result as any)?.isNew !== false;
+      const emailOk = (result as any)?.email?.ok;
+      setMsg(isNew ? `✅ Certificate issued for ${editedName.trim()} (${selected.kr8_id}). Code: ${certCode}${emailOk === false ? ' — Email failed, will retry' : emailOk ? ' — Email sent' : ''}` : `ℹ️ Already has active certificate for ${skillKey}: ${certCode}`);
+      setSelected(null);
       load();
-    } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
+    } catch (e: any) {
+      setMsg(`❌ Issue failed: ${e.message}`);
+    } finally { setBusy(false); }
   };
 
   const resend = async (certId: string) => {
     try {
-      const { data: cert } = await supabase.from('certificates').select('*').eq('id', certId).maybeSingle();
-      if (!cert) throw new Error('Cert not found');
-      // Simulate resend - in real would call Resend
-      await supabase.from('certificates').update({ email_sent_at: new Date().toISOString(), email_failure_reason: null }).eq('id', certId);
-      await logActivity(currentUserId, 'certificate_resend', certId, {});
-      setMsg('Email resent');
+      const result = await resendFn({ data: { certificateId: certId } });
+      if ((result as any)?.ok) {
+        setMsg('✅ Email resent successfully');
+      } else {
+        setMsg(`⚠️ Resend attempted but failed: ${(result as any)?.error || 'unknown'}`);
+      }
       load();
-    } catch (e: any) { setMsg(e.message); }
+    } catch (e: any) { setMsg(`❌ Resend failed: ${e.message}`); }
   };
 
   const withdraw = async (certId: string) => {
-    const reason = prompt('Reason for withdrawal?');
-    if (!reason) return;
+    const reason = prompt('Reason for withdrawal? (min 5 chars)');
+    if (!reason || reason.trim().length < 5) { alert('Reason must be at least 5 characters'); return; }
     try {
-      const { error } = await supabase.from('certificates').update({ status: 'withdrawn', withdrawal_reason: reason, withdrawn_at: new Date().toISOString(), withdrawn_by: currentUserId }).eq('id', certId);
-      if (error) throw error;
-      await logActivity(currentUserId, 'certificate_withdrawn', certId, { reason });
+      await withdrawFn({ data: { certificateId: certId, reason: reason.trim() } });
+      setMsg(`✅ Certificate withdrawn: ${reason}`);
       load();
-    } catch (e: any) { setMsg(e.message); }
+    } catch (e: any) { setMsg(`❌ Withdraw failed: ${e.message}`); }
   };
 
-  const filtered = students.filter(s => !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.kr8_id.toLowerCase().includes(search.toLowerCase()) || s.email.toLowerCase().includes(search.toLowerCase()));
+  const totalPages = Math.max(1, Math.ceil(total / 25));
 
   return (
     <div className="space-y-4">
       <Card className="p-6">
-        <h3 className="font-bold text-white text-lg">Graduation & Certificates</h3>
-        {msg && <div className="mt-3 rounded-xl bg-pink-500/10 border border-pink-500/30 p-2 text-xs text-pink-300">{msg}</div>}
+        <h3 className="font-bold text-white text-lg">Graduation & Certificates · Fixed</h3>
+        <p className="text-[11px] text-[#8a7ba8] mt-1">Uses secure server functions (service_role) — RLS no longer blocks issuance. Idempotent: won't duplicate same skill. Email via Resend automatically.</p>
+        {msg && <div className="mt-3 rounded-xl bg-pink-500/10 border border-pink-500/30 p-3 text-xs text-pink-300 whitespace-pre-wrap">{msg}</div>}
         <div className="mt-4 flex gap-2">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name/KR8 ID/email" className="flex-1 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white" />
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()} placeholder="Search by name/KR8 ID/email" className="flex-1 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white" />
+          <button onClick={doSearch} className="rounded-xl bg-gradient-pink px-4 py-2 text-xs font-bold text-white">Search</button>
           <button onClick={load} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-white">Refresh</button>
         </div>
-        <div className="mt-4 space-y-2 max-h-64 overflow-y-auto">
-          {filtered.map(s => (
+        <div className="mt-4 space-y-2 max-h-80 overflow-y-auto">
+          {students.map(s => (
             <div key={s.id} className="flex justify-between items-center rounded-xl border border-white/10 bg-white/[0.02] p-3">
-              <div><p className="text-sm font-bold text-white">{s.name} <span className="font-mono text-[11px] text-pink-400">{s.kr8_id}</span></p><p className="text-[11px] text-[#8a7ba8]">{s.email} · {s.skill} · {s.graduated ? 'Graduated' : 'Active'}</p></div>
-              <button onClick={() => openFor(s)} className="rounded-lg bg-gradient-pink px-3 py-1 text-[11px] font-bold text-white">Graduate</button>
+              <div><p className="text-sm font-bold text-white">{s.name} <span className="font-mono text-[11px] text-pink-400">{s.kr8_id}</span></p><p className="text-[11px] text-[#8a7ba8]">{s.email} · {s.skill} · {s.graduated ? 'Graduated' : 'Active'} · {s.points || 0}pts</p></div>
+              <button onClick={() => openFor(s)} className="rounded-lg bg-gradient-pink px-3 py-1.5 text-[11px] font-bold text-white hover:scale-105 transition">Graduate</button>
             </div>
           ))}
-          {filtered.length === 0 && <EmptyState msg="No students" />}
+          {students.length === 0 && <EmptyState msg="No students — try different search" />}
         </div>
-        <Pagination page={page} totalPages={10} onChange={setPage} />
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
       </Card>
 
       {selected && (
-        <Card className="p-6 border border-pink-500/30">
-          <h4 className="font-bold text-white">Issue Certificate for {selected.kr8_id}</h4>
+        <Card className="p-6 border border-pink-500/30 bg-gradient-to-br from-[#1a0030]/50 to-[#12001f]">
+          <h4 className="font-bold text-white flex items-center gap-2"><span>🎓</span> Issue Certificate for {selected.kr8_id}</h4>
           <div className="mt-4 space-y-3">
             <div>
-              <label className="text-[11px] text-[#8a7ba8]">Student Name on Certificate (Editable) *</label>
-              <input value={editedName} onChange={e => setEditedName(e.target.value)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white" />
+              <label className="text-[11px] text-[#8a7ba8]">Student Name on Certificate (Editable) * — this is what appears on PDF</label>
+              <input value={editedName} onChange={e => setEditedName(e.target.value)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-sm text-white focus:border-pink-400/60 focus:outline-none" placeholder="Full name as should appear" />
             </div>
-            <label className="flex items-center gap-2 text-xs text-white">
+            <label className="flex items-center gap-2 text-xs text-white bg-white/[0.03] p-2 rounded-xl border border-white/10">
               <input type="checkbox" checked={alsoUpdateProfile} onChange={e => setAlsoUpdateProfile(e.target.checked)} className="accent-pink-500" />
-              Also update student's profile name
+              Also update student's profile name to this edited name (stays linked, no duplicate)
             </label>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] text-[#8a7ba8]">Tier *</label>
-                <select value={tier} onChange={e => setTier(e.target.value as any)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white">
-                  <option value="Professionalism">Professionalism</option>
-                  <option value="Completion">Completion</option>
+                <select value={tier} onChange={e => setTier(e.target.value as any)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-xs text-white">
+                  <option value="Professionalism">Professionalism (Excellence)</option>
+                  <option value="Completion">Completion (Hands-on)</option>
                 </select>
               </div>
               <div>
-                <label className="text-[11px] text-[#8a7ba8]">Skill Key</label>
-                <input value={skillKey} onChange={e => setSkillKey(e.target.value)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+                <label className="text-[11px] text-[#8a7ba8]">Skill Key *</label>
+                <select value={skillKey} onChange={e => { setSkillKey(e.target.value); const names: any = { graphic: 'Graphic Design', video: 'Video Editing & Animation', web: 'Website Development', frontend: 'Front-End Development', content_creation: 'Content Creation', smm: 'Social Media Management', marketing: 'Digital Marketing' }; setSkillName(names[e.target.value] || e.target.value); }} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-xs text-white">
+                  <option value="graphic">graphic</option>
+                  <option value="video">video</option>
+                  <option value="web">web</option>
+                  <option value="frontend">frontend</option>
+                  <option value="content_creation">content_creation</option>
+                  <option value="smm">smm</option>
+                  <option value="marketing">marketing</option>
+                </select>
               </div>
             </div>
             <div>
-              <label className="text-[11px] text-[#8a7ba8]">Skill Name</label>
-              <input value={skillName} onChange={e => setSkillName(e.target.value)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+              <label className="text-[11px] text-[#8a7ba8]">Skill Name * (display)</label>
+              <input value={skillName} onChange={e => setSkillName(e.target.value)} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-xs text-white" />
             </div>
             <div>
-              <label className="text-[11px] text-[#8a7ba8]">Additional Notes</label>
-              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Best Performer" className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+              <label className="text-[11px] text-[#8a7ba8]">Additional Notes / Recognition</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Best Performer, Top 5%" className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-xs text-white" />
             </div>
-            <div className="flex gap-2 pt-2">
-              <button onClick={issue} disabled={busy} className="rounded-xl bg-gradient-pink px-6 py-2.5 text-xs font-bold text-white disabled:opacity-50">{busy ? "Issuing..." : "Issue Certificate"}</button>
-              <button onClick={() => setSelected(null)} className="rounded-xl border border-white/15 px-4 py-2.5 text-xs text-white">Cancel</button>
+            <div className="flex gap-2 pt-3">
+              <button onClick={issue} disabled={busy} className="rounded-xl bg-gradient-pink px-8 py-3 text-sm font-bold text-white disabled:opacity-50 shadow-lg shadow-pink-500/20 hover:scale-[1.02] transition">{busy ? "Issuing + Emailing..." : "✅ Issue Certificate (Secure)"}</button>
+              <button onClick={() => setSelected(null)} className="rounded-xl border border-white/15 px-5 py-3 text-xs text-white hover:bg-white/5">Cancel</button>
             </div>
+            <p className="text-[10px] text-[#6a5b82]">Server function checks: founder/co-founder/admin with issue_certificates permission, idempotent (won't duplicate), sends Resend email, logs activity, updates profile graduated flag.</p>
           </div>
         </Card>
       )}
 
       <Card className="p-6">
-        <h4 className="font-bold text-white text-sm">All Certificates</h4>
+        <h4 className="font-bold text-white text-sm">All Certificates · Live</h4>
         <div className="mt-3 space-y-2">
           {certs.map((c: any) => (
             <div key={c.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 flex justify-between gap-2">
-              <div className="min-w-0"><p className="text-xs font-bold text-white truncate">{c.student_name} · {c.certificate_code} · {c.tier} · {c.status}</p><p className="text-[11px] text-[#8a7ba8]">{c.skill_name} · {c.kr8_id} · {c.email_sent_at ? 'Email Sent' : 'No Email'} {c.email_failure_reason ? `· Failed: ${c.email_failure_reason}` : ''}</p></div>
-              <div className="flex gap-1 shrink-0">
-                <button onClick={() => resend(c.id)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">Resend Email</button>
-                <button onClick={() => withdraw(c.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300">Withdraw</button>
+              <div className="min-w-0"><p className="text-xs font-bold text-white truncate">{c.student_name} · <span className="font-mono text-pink-400">{c.certificate_code}</span> · {c.tier} · <span className={c.status === 'active' ? 'text-emerald-300' : 'text-red-300'}>{c.status}</span></p><p className="text-[11px] text-[#8a7ba8]">{c.skill_name} · {c.kr8_id} · {c.email_sent_at ? `✅ Email Sent ${new Date(c.email_sent_at).toLocaleDateString()}` : '⏳ No Email'} {c.email_failure_reason ? `· ❌ Failed: ${c.email_failure_reason}` : ''}</p><p className="text-[10px] text-[#6a5b82]">{c.issued_at ? new Date(c.issued_at).toLocaleString() : ''}</p></div>
+              <div className="flex gap-1 shrink-0 flex-col sm:flex-row">
+                <button onClick={() => resend(c.id)} className="px-3 py-1.5 rounded-lg bg-white/10 text-[11px] font-bold text-white hover:bg-white/20">Resend Email</button>
+                <button onClick={() => withdraw(c.id)} className="px-3 py-1.5 rounded-lg bg-red-500/20 text-[11px] font-bold text-red-300 hover:bg-red-500/30">Withdraw</button>
               </div>
             </div>
           ))}
-          {certs.length === 0 && <EmptyState msg="No certificates" />}
+          {certs.length === 0 && <EmptyState msg="No certificates yet — graduate a student above" />}
         </div>
       </Card>
 
-      <Card className="p-6">
-        <h4 className="font-bold text-white text-sm">Failed Certificate Emails</h4>
+      <Card className="p-6 border border-red-500/20">
+        <h4 className="font-bold text-red-200 text-sm">Failed Certificate Emails · Retry</h4>
         <div className="mt-3 space-y-2">
           {failedEmails.map((f: any) => (
             <div key={f.id} className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 flex justify-between gap-2">
-              <div><p className="text-xs font-bold text-red-200">{f.student_name} · {f.certificate_code}</p><p className="text-[11px] text-red-300/80">{f.email_failure_reason}</p></div>
-              <button onClick={() => resend(f.id)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white shrink-0">Retry</button>
+              <div><p className="text-xs font-bold text-red-200">{f.student_name} · <span className="font-mono">{f.certificate_code}</span> · {f.kr8_id}</p><p className="text-[11px] text-red-300/80 break-words">{f.email_failure_reason}</p></div>
+              <button onClick={() => resend(f.id)} className="px-3 py-1.5 rounded-lg bg-white/10 text-[11px] font-bold text-white shrink-0 hover:bg-white/20">Retry</button>
             </div>
           ))}
-          {failedEmails.length === 0 && <EmptyState msg="No failed emails" />}
+          {failedEmails.length === 0 && <EmptyState msg="✅ No failed emails — all good" />}
         </div>
       </Card>
     </div>
@@ -2161,18 +2202,18 @@ function ClientRequestsTab({ currentUserId }: { currentUserId: string }) {
   );
 }
 
-// ----------------- AGENCY PORTFOLIO -----------------
+// ----------------- AGENCY PORTFOLIO - FIXED: correct column names image_url -----------------
 function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ title: "", client: "", image: "", link: "", sort: 0, visible: true });
+  const [form, setForm] = useState({ title: "", client: "", image_url: "", link: "", description: "", sort: 0, visible: true });
   const [uploading, setUploading] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('agency_portfolio').select('id,title,client,image,link,sort,visible,created_at').order('sort', { ascending: true });
+      const { data, error } = await supabase.from('agency_portfolio').select('id,title,client,image_url,link,description,sort,visible,created_at').order('sort', { ascending: true });
       if (error) throw error;
       setItems(data || []);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
@@ -2182,20 +2223,30 @@ function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
   const handleUpload = async (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { setErr('Image max 10MB'); return; }
     setUploading(true);
     try {
       const url = await uploadToBucket(file, 'site-media', 'agency');
-      setForm(prev => ({ ...prev, image: url }));
+      setForm(prev => ({ ...prev, image_url: url }));
     } catch (e: any) { setErr(e.message); } finally { setUploading(false); }
   };
 
   const save = async () => {
     if (!form.title) { setErr('Title required'); return; }
     try {
-      const { error } = await supabase.from('agency_portfolio').insert({ ...form });
+      const payload: any = {
+        title: form.title,
+        client: form.client || null,
+        image_url: form.image_url || null,
+        link: form.link || null,
+        description: form.description || null,
+        sort: form.sort,
+        visible: form.visible,
+      };
+      const { error } = await supabase.from('agency_portfolio').insert(payload);
       if (error) throw error;
       await logActivity(currentUserId, 'agency_create', form.title, {});
-      setForm({ title: "", client: "", image: "", link: "", sort: 0, visible: true });
+      setForm({ title: "", client: "", image_url: "", link: "", description: "", sort: 0, visible: true });
       load();
     } catch (e: any) { setErr(e.message); }
   };
@@ -2230,9 +2281,10 @@ function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
             <input value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} placeholder="Client" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
           </div>
           <div className="flex gap-2">
-            <input value={form.image} onChange={e => setForm({ ...form, image: e.target.value })} placeholder="Image URL" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <input value={form.image_url} onChange={e => setForm({ ...form, image_url: e.target.value })} placeholder="Image URL (Storage public URL)" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
             <label className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white cursor-pointer">{uploading ? 'Uploading...' : 'Upload'}<input type="file" accept="image/*" className="hidden" onChange={handleUpload} /></label>
           </div>
+          <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description" className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
           <div className="grid gap-2 sm:grid-cols-2">
             <input value={form.link} onChange={e => setForm({ ...form, link: e.target.value })} placeholder="Link https://..." className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
             <input type="number" value={form.sort} onChange={e => setForm({ ...form, sort: parseInt(e.target.value) || 0 })} placeholder="Sort order" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
@@ -2247,7 +2299,7 @@ function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {items.map((it: any) => (
             <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
-              {it.image && <img src={it.image} alt={it.title} className="w-full h-32 object-cover" />}
+              {(it.image_url || it.image) && <img src={it.image_url || it.image} alt={it.title} className="w-full h-32 object-cover" />}
               <div className="p-3">
                 <p className="text-xs font-bold text-white">{it.title} · {it.client} {!it.visible && <span className="ml-1 px-1 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">HIDDEN</span>}</p>
                 <div className="mt-2 flex gap-1"><button onClick={() => toggle(it)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">{it.visible ? 'Hide' : 'Show'}</button><button onClick={() => del(it.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300">Del</button></div>
@@ -2266,13 +2318,13 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", role: "", bio: "", photo: "", social_links: "", sort: 0, visible: true });
+  const [form, setForm] = useState({ name: "", role: "", bio: "", photo_url: "", social_links: "", sort: 0, visible: true });
   const [uploading, setUploading] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('team_members').select('id,name,role,bio,photo,social_links,sort,visible').order('sort', { ascending: true });
+      const { data, error } = await supabase.from('team_members').select('id,name,role,bio,photo_url,social_links,sort,visible').order('sort', { ascending: true });
       if (error) throw error;
       setItems(data || []);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
@@ -2282,10 +2334,11 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
   const handleUpload = async (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { setErr('Image max 10MB'); return; }
     setUploading(true);
     try {
       const url = await uploadToBucket(file, 'site-media', 'team');
-      setForm(prev => ({ ...prev, photo: url }));
+      setForm(prev => ({ ...prev, photo_url: url }));
     } catch (e: any) { setErr(e.message); } finally { setUploading(false); }
   };
 
@@ -2294,10 +2347,10 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
     try {
       let social: any = {};
       if (form.social_links) { try { social = JSON.parse(form.social_links); } catch { social = {}; } }
-      const { error } = await supabase.from('team_members').insert({ name: form.name, role: form.role, bio: form.bio, photo: form.photo, social_links: social, sort: form.sort, visible: form.visible });
+      const { error } = await supabase.from('team_members').insert({ name: form.name, role: form.role, bio: form.bio, photo_url: form.photo_url, social_links: social, sort: form.sort, visible: form.visible });
       if (error) throw error;
       await logActivity(currentUserId, 'team_create', form.name, {});
-      setForm({ name: "", role: "", bio: "", photo: "", social_links: "", sort: 0, visible: true });
+      setForm({ name: "", role: "", bio: "", photo_url: "", social_links: "", sort: 0, visible: true });
       load();
     } catch (e: any) { setErr(e.message); }
   };
@@ -2325,7 +2378,7 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
           </div>
           <textarea value={form.bio} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Bio" rows={2} className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
           <div className="flex gap-2">
-            <input value={form.photo} onChange={e => setForm({ ...form, photo: e.target.value })} placeholder="Photo URL" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <input value={form.photo_url} onChange={e => setForm({ ...form, photo_url: e.target.value })} placeholder="Photo URL (Storage)" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
             <label className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white cursor-pointer">{uploading ? 'Uploading...' : 'Upload'}<input type="file" accept="image/*" className="hidden" onChange={handleUpload} /></label>
           </div>
           <input value={form.social_links} onChange={e => setForm({ ...form, social_links: e.target.value })} placeholder='Social links JSON e.g. {"instagram":"https://..."}' className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white font-mono" />
@@ -2342,7 +2395,7 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
         <div className="mt-3 space-y-2">
           {items.map((it: any) => (
             <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 flex justify-between gap-2">
-              <div className="flex gap-3 min-w-0"><img src={it.photo || '/branding/kr8_logo.png'} alt={it.name} className="h-10 w-10 rounded-full object-cover shrink-0" /><div className="min-w-0"><p className="text-xs font-bold text-white truncate">{it.name} · {it.role} {!it.visible && <span className="ml-1 px-1 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">HIDDEN</span>}</p><p className="text-[11px] text-[#8a7ba8] truncate">{it.bio?.slice(0, 80)}</p></div></div>
+              <div className="flex gap-3 min-w-0"><img src={it.photo_url || it.photo || '/branding/kr8_logo.png'} alt={it.name} className="h-10 w-10 rounded-full object-cover shrink-0" /><div className="min-w-0"><p className="text-xs font-bold text-white truncate">{it.name} · {it.role} {!it.visible && <span className="ml-1 px-1 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">HIDDEN</span>}</p><p className="text-[11px] text-[#8a7ba8] truncate">{it.bio?.slice(0, 80)}</p></div></div>
               <button onClick={() => del(it.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300 shrink-0">Del</button>
             </div>
           ))}

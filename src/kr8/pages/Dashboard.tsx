@@ -9,7 +9,8 @@ import LiveFeed from "../components/LiveFeed";
 import LeaderboardList from "../components/LeaderboardList";
 import { Pill, Card } from "../components/ui";
 import Icon from "../components/Icon";
-import CertificateDocumentView from "../components/CertificateDocumentView";
+import { lazy, Suspense } from "react";
+const CertificateDocumentView = lazy(() => import("../components/CertificateDocumentView"));
 import { downloadCertificatePdf } from "../utils/certificate";
 import AnnouncementCard from "../components/AnnouncementCard";
 import GraduationShareModal from "../components/GraduationShareModal";
@@ -53,11 +54,11 @@ export default function Dashboard() {
           console.warn('Dashboard certs error', e);
         }
 
-        // Fetch leaderboard rank from profiles - safe
+        // Fetch leaderboard rank from public RPC - fast, cached
         try {
-          const { data: profiles } = await supabase.from('profiles').select('kr8_id,points').order('points', { ascending: false }).limit(500);
-          if (mounted && profiles) {
-            const idx = profiles.findIndex(p => p.kr8_id === currentUser!.kr8_id);
+          const { data: leaderboard } = await supabase.rpc('get_leaderboard', { p_limit: 500 });
+          if (mounted && leaderboard) {
+            const idx = (leaderboard as any[]).findIndex((p: any) => p.kr8_id === currentUser!.kr8_id || p.user_id === currentUser!.id);
             if (idx >= 0) setRank(idx + 1);
           }
         } catch (e) {
@@ -315,11 +316,13 @@ export default function Dashboard() {
 
                 {primaryCert && (
                   <div className="w-full sm:w-80 shrink-0">
-                    <CertificateDocumentView
-                      cert={toLegacyCert(primaryCert) as any}
-                      student={{ id: currentUser.kr8_id, name: currentUser.name } as any}
-                      maxHeight="220px"
-                    />
+                    <Suspense fallback={<div className="h-32 rounded-xl bg-white/[0.03] animate-pulse" />}>
+                      <CertificateDocumentView
+                        cert={toLegacyCert(primaryCert) as any}
+                        student={{ id: currentUser.kr8_id, name: currentUser.name } as any}
+                        maxHeight="220px"
+                      />
+                    </Suspense>
                   </div>
                 )}
               </div>
