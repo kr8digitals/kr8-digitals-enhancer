@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState } from "react";
 import type { MsEventConfig } from "../data/mindsetShift";
 import type { IconName } from "./Icon";

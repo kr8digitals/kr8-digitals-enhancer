@@ -1,201 +1,467 @@
-// @ts-nocheck
+// Production Auth Context - Supabase Auth as source of truth, fresh start
+// No claim flow, no legacy accounts, only 3 founders remain
+// Founder: Timfire (kr8digitals01@gmail.com, +2348125687509) - email verified ownership
+// Co-founders: Daniel +2348106068523, Motionverse +2348089344434 - phone OTP or founder promotion
+// Fixed: added addNotification compatibility for LiveStreamContext and other legacy components
+
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { findStudent, type Account } from "../data/store";
-import { logActivity } from "../lib/activityLog";
+import { supabase } from "@/integrations/supabase/client";
+import type { Session, User } from "@supabase/supabase-js";
+
+export type Profile = {
+  id: string;
+  kr8_id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  phone_normalized: string | null;
+  country: string | null;
+  dob: string | null;
+  skill: string | null;
+  avatar: string | null;
+  bio: string | null;
+  cover_photo: string | null;
+  points: number;
+  attendance_accepted: number;
+  submissions: number;
+  referrals: number;
+  graduated: boolean;
+  cert_tier: string | null;
+  cert_recognition: string | null;
+  joined: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  phone_verified: boolean;
+};
+
+export type UserRole = {
+  id: string;
+  user_id: string;
+  role: string;
+  title: string | null;
+  permissions: string[] | null;
+  granted_by: string | null;
+  granted_at: string | null;
+};
+
+export type AuthUser = {
+  id: string;
+  kr8_id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  phone_normalized: string | null;
+  country: string | null;
+  skill: string | null;
+  avatar: string | null;
+  bio: string | null;
+  cover_photo: string | null;
+  points: number;
+  attendance_accepted: number;
+  submissions: number;
+  referrals: number;
+  graduated: boolean;
+  cert_tier: string | null;
+  cert_recognition: string | null;
+  joined: string | null;
+  roles: UserRole[];
+  isAdmin: boolean;
+  isHost: boolean;
+  isFounder: boolean;
+  isCoFounder: boolean;
+  type: "student" | "tribe" | "founder" | "co-founder";
+  executiveRole?: "Founder" | "Co-Founder";
+  title?: string;
+  admin?: {
+    role: "ultimate" | "admin" | "coach" | "assistant" | "attendance_reviewer";
+    title?: string;
+    permissions: string[];
+  };
+  // Legacy compatibility
+  countryCode?: string;
+  dob?: string;
+};
+
+export type Account = AuthUser;
+
+type Notification = { id: string; text: string; ts: number };
 
 type AuthCtx = {
-  student: Account | null; // active account (student or tribe)
-  user: Account | null; // universal alias for active user
+  user: AuthUser | null;
+  student: AuthUser | null;
+  session: Session | null;
+  supabaseUser: User | null;
+  loading: boolean;
   deviceSessionToken: string | null;
-  signIn: (s: Account) => void;
-  signOut: () => void;
-  notifications: { id: string; text: string; ts: number }[];
+  notifications: Notification[];
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string; user?: AuthUser; message?: string }>;
+  signUp: (data: { name: string; email: string; phone: string; password: string; country?: string; skill?: string; dob?: string }) => Promise<{ ok: boolean; error?: string; user?: AuthUser; message?: string; kr8_id?: string }>;
+  signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
+  refreshProfile: () => Promise<void>;
   addNotification: (text: string) => void;
   clearNotifications: () => void;
+  // Legacy compat for components that call signIn with Account
+  legacySignIn?: (account: any) => void;
 };
 
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
-const SESSION_KEY = "kr8_last_active";
-const DEVICE_TOKEN_KEY = "kr8_device_session_token_v1";
-const DEVICE_SESSION_DATA = "kr8_device_session_data_v1";
-// 5 full days (120 hours) persistent device session
-const INACTIVITY_LIMIT = 5 * 24 * 60 * 60 * 1000;
 
-function getOrCreateDeviceToken(): string {
-  try {
-    let token = localStorage.getItem(DEVICE_TOKEN_KEY);
-    if (!token) {
-      token = "dev_" + Math.random().toString(36).substring(2) + "_" + Date.now().toString(36);
-      localStorage.setItem(DEVICE_TOKEN_KEY, token);
-    }
-    return token;
-  } catch {
-    return "dev_fallback";
+function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const cleaned = phone.replace(/[^0-9]/g, '');
+  if (cleaned.startsWith('0') && cleaned.length === 11) {
+    return '234' + cleaned.substring(1);
+  } else if (cleaned.startsWith('234') && cleaned.length === 13) {
+    return cleaned;
+  } else if (cleaned.length === 10) {
+    return '234' + cleaned;
   }
+  return cleaned;
+}
+
+function mapProfileToAuthUser(profile: any, roles: UserRole[]): AuthUser {
+  const roleNames = roles.map(r => r.role);
+  const isFounder = roleNames.includes('founder');
+  const isCoFounder = roleNames.includes('co-founder');
+  const isAdmin = roleNames.some(r => ['founder','co-founder','admin'].includes(r));
+  const isHost = roleNames.some(r => ['founder','co-founder','admin','coach'].includes(r));
+
+  const adminRole = roles.find(r => ['founder','co-founder','admin','coach','assistant','attendance_reviewer'].includes(r.role));
+
+  // Parse permissions - can be jsonb array or string array
+  let permissions: string[] = [];
+  if (adminRole?.permissions) {
+    if (Array.isArray(adminRole.permissions)) {
+      permissions = adminRole.permissions as string[];
+    } else if (typeof adminRole.permissions === 'string') {
+      try {
+        permissions = JSON.parse(adminRole.permissions);
+      } catch {
+        permissions = [];
+      }
+    } else {
+      // jsonb
+      permissions = adminRole.permissions as any;
+    }
+  }
+
+  return {
+    id: profile.id,
+    kr8_id: profile.kr8_id,
+    name: profile.name,
+    email: profile.email,
+    phone: profile.phone,
+    phone_normalized: profile.phone_normalized || normalizePhone(profile.phone),
+    country: profile.country,
+    countryCode: profile.country || 'NG',
+    skill: profile.skill,
+    avatar: profile.avatar,
+    bio: profile.bio,
+    cover_photo: profile.cover_photo,
+    points: profile.points || 0,
+    attendance_accepted: profile.attendance_accepted || 0,
+    submissions: profile.submissions || 0,
+    referrals: profile.referrals || 0,
+    graduated: !!profile.graduated,
+    cert_tier: profile.cert_tier,
+    cert_recognition: profile.cert_recognition,
+    joined: profile.joined,
+    roles,
+    isAdmin,
+    isHost,
+    isFounder,
+    isCoFounder,
+    type: isFounder ? 'founder' : isCoFounder ? 'co-founder' : (roleNames.includes('tribe') ? 'tribe' : 'student'),
+    executiveRole: isFounder ? 'Founder' : isCoFounder ? 'Co-Founder' : undefined,
+    title: adminRole?.title || (isFounder ? 'Founder & CEO' : isCoFounder ? 'Co-Founder' : undefined),
+    admin: adminRole ? {
+      role: (adminRole.role === 'founder' || adminRole.role === 'co-founder' ? 'ultimate' : adminRole.role as any),
+      title: adminRole.title || undefined,
+      permissions,
+    } : undefined,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [student, setStudent] = useState<Account | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<AuthCtx["notifications"]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  useEffect(() => {
+  const fetchProfile = async (userId: string): Promise<AuthUser | null> => {
     try {
-      const token = getOrCreateDeviceToken();
-      setDeviceToken(token);
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-      const s = localStorage.getItem("kr8_current");
-      const lastActive = Number(localStorage.getItem(SESSION_KEY) || 0);
-      const isExpired = lastActive > 0 && Date.now() - lastActive > INACTIVITY_LIMIT;
-
-      if (isExpired) {
-        // Expired after 5 days of device inactivity
-        localStorage.removeItem("kr8_current");
-        localStorage.removeItem(SESSION_KEY);
-        localStorage.removeItem(DEVICE_SESSION_DATA);
-        setStudent(null);
-      } else if (s) {
-        const stored = JSON.parse(s) as Account;
-        const current = findStudent(stored.id);
-        if (current) {
-          setStudent(current);
-          localStorage.setItem("kr8_current", JSON.stringify(current));
-          // Refresh touch timestamp
-          localStorage.setItem(SESSION_KEY, String(Date.now()));
-        } else {
-          localStorage.removeItem("kr8_current");
-        }
+      if (profileError) {
+        console.warn('Profile fetch error:', profileError.message);
+        return null;
       }
 
-      const n = localStorage.getItem("kr8_notifs");
-      if (n) setNotifications(JSON.parse(n));
-    } catch {
-      /* ignore */
-    }
-  }, []);
+      if (!profile) return null;
 
-  // Real-time synchronization when accounts are updated or logged out
-  useEffect(() => {
-    const handleSync = () => {
-      try {
-        const s = localStorage.getItem("kr8_current");
-        if (s) {
-          const stored = JSON.parse(s) as Account;
-          const fresh = findStudent(stored.id);
-          if (fresh) {
-            setStudent(fresh);
-            localStorage.setItem("kr8_current", JSON.stringify(fresh));
-          } else {
-            setStudent(null);
-            localStorage.removeItem("kr8_current");
-          }
-        } else {
-          setStudent(null);
-        }
-      } catch {
-        /* ignore */
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (rolesError) {
+        console.warn('Roles fetch error:', rolesError.message);
       }
-    };
 
-    const handleLogout = () => {
-      setStudent(null);
-    };
-
-    window.addEventListener("kr8:accounts-updated", handleSync);
-    window.addEventListener("kr8:auth-logout", handleLogout);
-    window.addEventListener("storage", handleSync);
-    return () => {
-      window.removeEventListener("kr8:accounts-updated", handleSync);
-      window.removeEventListener("kr8:auth-logout", handleLogout);
-      window.removeEventListener("storage", handleSync);
-    };
-  }, []);
-
-  // Device activity tracker — sliding 5-day expiration window
-  useEffect(() => {
-    const touch = () => {
-      if (!localStorage.getItem("kr8_current")) return;
-      const now = Date.now();
-      localStorage.setItem(SESSION_KEY, String(now));
-      try {
-        const raw = localStorage.getItem(DEVICE_SESSION_DATA);
-        if (raw) {
-          const data = JSON.parse(raw);
-          data.lastActive = now;
-          data.expiresAt = now + INACTIVITY_LIMIT;
-          localStorage.setItem(DEVICE_SESSION_DATA, JSON.stringify(data));
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-
-    const events = ["click", "keydown", "touchstart", "mousemove", "visibilitychange"];
-    events.forEach((event) => window.addEventListener(event, touch));
-
-    // Periodic check for 5-day expiration
-    const timer = window.setInterval(() => {
-      const last = Number(localStorage.getItem(SESSION_KEY) || 0);
-      if (last && Date.now() - last > INACTIVITY_LIMIT) {
-        setStudent(null);
-        localStorage.removeItem("kr8_current");
-        localStorage.removeItem(SESSION_KEY);
-        localStorage.removeItem(DEVICE_SESSION_DATA);
-      }
-    }, 60_000);
-
-    return () => {
-      events.forEach((event) => window.removeEventListener(event, touch));
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const signIn = (s: Account) => {
-    const token = getOrCreateDeviceToken();
-    const now = Date.now();
-    setStudent(s);
-    logActivity("sign_in", { actorId: s.id, actorName: s.name });
-    setDeviceToken(token);
-    try {
-      localStorage.setItem("kr8_current", JSON.stringify(s));
-      localStorage.setItem(SESSION_KEY, String(now));
-      localStorage.setItem(
-        DEVICE_SESSION_DATA,
-        JSON.stringify({
-          accountId: s.id,
-          deviceToken: token,
-          email: s.email,
-          lastActive: now,
-          expiresAt: now + INACTIVITY_LIMIT,
-        })
-      );
-    } catch {
-      /* ignore */
+      return mapProfileToAuthUser(profile, (roles as any) || []);
+    } catch (err) {
+      console.error('fetchProfile error:', err);
+      return null;
     }
   };
 
-  const signOut = () => {
-    if (student) logActivity("sign_out", { actorId: student.id, actorName: student.name });
-    setStudent(null);
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      try {
+        // Load notifications from localStorage for compatibility
+        try {
+          const n = localStorage.getItem('kr8_notifs');
+          if (n) setNotifications(JSON.parse(n));
+        } catch {}
+
+        // Device token
+        try {
+          let token = localStorage.getItem('kr8_device_session_token_v1');
+          if (!token) {
+            token = 'dev_' + Math.random().toString(36).substring(2) + '_' + Date.now().toString(36);
+            localStorage.setItem('kr8_device_session_token_v1', token);
+          }
+          if (mounted) setDeviceToken(token);
+        } catch {
+          if (mounted) setDeviceToken('dev_fallback');
+        }
+
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+
+        if (initialSession?.user) {
+          setSession(initialSession);
+          setSupabaseUser(initialSession.user);
+          const profile = await fetchProfile(initialSession.user.id);
+          if (mounted) setUser(profile);
+        }
+      } catch (err) {
+        console.error('Auth init error:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!mounted) return;
+
+      setSession(newSession);
+      setSupabaseUser(newSession?.user || null);
+
+      if (newSession?.user) {
+        const profile = await fetchProfile(newSession.user.id);
+        setUser(profile);
+
+        if (event === 'SIGNED_IN') {
+          try {
+            await supabase.from('activity_log').insert({
+              actor_id: newSession.user.id,
+              action: 'sign_in',
+              details: { method: 'supabase_auth' },
+            });
+          } catch {}
+        }
+      } else {
+        setUser(null);
+      }
+
+      setLoading(false);
+    });
+
+    let profileChannel: any = null;
+    const setupRealtime = async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession?.user) return;
+
+      profileChannel = supabase
+        .channel(`profile-${currentSession.user.id}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${currentSession.user.id}`
+        }, async () => {
+          const profile = await fetchProfile(currentSession.user.id);
+          if (mounted) setUser(profile);
+        })
+        .subscribe();
+    };
+
+    setupRealtime();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      if (profileChannel) supabase.removeChannel(profileChannel);
+    };
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
     try {
-      localStorage.removeItem("kr8_current");
-      localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem(DEVICE_SESSION_DATA);
-      sessionStorage.removeItem("kr8_current");
-      window.dispatchEvent(new CustomEvent("kr8:auth-logout"));
-    } catch {
-      /* ignore */
+      const cleanEmail = email.trim().toLowerCase();
+      
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+
+      if (data.user) {
+        const profile = await fetchProfile(data.user.id);
+        if (profile) {
+          setUser(profile);
+          return { ok: true, user: profile };
+        }
+        return { ok: true, user: undefined };
+      }
+
+      return { ok: false, error: 'Sign in failed' };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Sign in failed' };
+    }
+  };
+
+  const signUp = async (input: { name: string; email: string; phone: string; password: string; country?: string; skill?: string; dob?: string }) => {
+    try {
+      const cleanEmail = input.email.trim().toLowerCase();
+      const normalizedPhone = normalizePhone(input.phone);
+
+      const signUpOptions: any = {
+        data: {
+          name: input.name.trim(),
+          phone: input.phone,
+          phone_normalized: normalizedPhone,
+          country: input.country || 'NG',
+          skill: input.skill || 'graphic',
+          dob: input.dob || '',
+        },
+      };
+      if (typeof window !== 'undefined') {
+        signUpOptions.emailRedirectTo = `${window.location.origin}/dashboard`;
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: input.password,
+        options: signUpOptions
+      });
+
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+
+      if (data.user) {
+        await new Promise(r => setTimeout(r, 800));
+        const profile = await fetchProfile(data.user.id);
+        if (profile) {
+          setUser(profile);
+          return { ok: true, user: profile, kr8_id: profile.kr8_id, message: `Account created! Your KR8 ID is ${profile.kr8_id}. Please check email to verify.` };
+        }
+        return { ok: true, message: 'Account created! Please check email to verify, then sign in.', kr8_id: undefined } as any;
+      }
+
+      return { ok: false, error: 'Sign up failed' };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Sign up failed' };
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      if (user) {
+        try {
+          await supabase.from('activity_log').insert({
+            actor_id: user.id,
+            action: 'sign_out',
+          });
+        } catch {}
+      }
+      await supabase.auth.signOut();
+      setUser(null);
+      setSession(null);
+      setSupabaseUser(null);
+      try {
+        localStorage.removeItem('kr8_current');
+        window.dispatchEvent(new CustomEvent('kr8:auth-logout'));
+      } catch {}
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const resetOptions: any = {};
+      if (typeof window !== 'undefined') {
+        resetOptions.redirectTo = `${window.location.origin}/reset-password`;
+      }
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, resetOptions);
+
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Password reset failed' };
+    }
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+
+      return { ok: true, message: 'Password updated successfully' };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Password update failed' };
+    }
+  };
+
+  const refreshProfile = async () => {
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    if (currentSession?.user) {
+      const profile = await fetchProfile(currentSession.user.id);
+      setUser(profile);
     }
   };
 
   const addNotification = (text: string) => {
-    setNotifications((prev) => {
+    setNotifications(prev => {
       const next = [{ id: Math.random().toString(36).slice(2), text, ts: Date.now() }, ...prev].slice(0, 20);
       try {
-        localStorage.setItem("kr8_notifs", JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
+        localStorage.setItem('kr8_notifs', JSON.stringify(next));
+      } catch {}
       return next;
     });
   };
@@ -203,21 +469,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearNotifications = () => {
     setNotifications([]);
     try {
-      localStorage.removeItem("kr8_notifs");
-    } catch {
-      /* ignore */
-    }
+      localStorage.removeItem('kr8_notifs');
+    } catch {}
   };
 
   return (
     <Ctx.Provider
       value={{
-        student,
-        user: student,
+        user,
+        student: user,
+        session,
+        supabaseUser,
+        loading,
         deviceSessionToken: deviceToken,
-        signIn,
-        signOut,
         notifications,
+        signIn,
+        signUp,
+        signOut,
+        resetPassword,
+        updatePassword,
+        refreshProfile,
         addNotification,
         clearNotifications,
       }}
@@ -227,4 +498,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export const useAuth = () => useContext(Ctx);
+export const useAuth = () => {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+};

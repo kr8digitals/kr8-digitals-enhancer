@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useEffect } from "react";
 import { Link } from "../router-shim";
 import { CONTACT, getFounders, getTeam, PARTNERS } from "../data/store";

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Icon from "./Icon";
 import {

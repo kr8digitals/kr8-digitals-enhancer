@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * KR8 Digitals — Certificate Templates Architecture
  * Strict separation of Certificate of Professionalism and Certificate of Completion.

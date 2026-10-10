@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "../router-shim";
 import { supabase } from "@/integrations/supabase/client";

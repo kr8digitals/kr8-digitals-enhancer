@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { PDFDocument } from "pdf-lib";
 import QRCode from "qrcode";
 import { getCertificateTemplate, type CertificateTier } from "../data/certificateTemplates";
@@ -325,13 +324,15 @@ export async function generateAutomaticCertificate(params: {
 
   // 1. Resolve template configuration
   const config = getCertificateTemplate(skillKey, tier, courseName);
-  const certId =
-    params.certId ||
-    `CERT-KR8-${student.id.replace(/[^A-Za-z0-9]/g, "")}-${Date.now().toString(36).toUpperCase()}`;
+  // FIX: Use saved certificate_code as certId, not made-up CERT-KR8-<id>-<timestamp>
+  // KR8 ID must be used for QR URL and printed ID, not internal UUID
+  const certId = params.certId || (student as any).certificate_code || `CERT-KR8-${(student as any).kr8_id || student.id}-${Date.now().toString(36).toUpperCase()}`;
 
   const baseOrigin =
     origin || (typeof window !== "undefined" ? window.location.origin : "https://kr8digitals.com");
-  const verifyUrl = `${baseOrigin}/verify?id=${encodeURIComponent(student.id)}&cert=${encodeURIComponent(certId)}`;
+  // Use kr8_id for QR URL, not internal id
+  const kr8IdForQr = (student as any).kr8_id || student.id;
+  const verifyUrl = `${baseOrigin}/verify?id=${encodeURIComponent(kr8IdForQr)}&cert=${encodeURIComponent(certId)}`;
 
   // 2. Load font, template image, and QR code in parallel
   const [, certImg, qrDataUrl] = await Promise.all([
@@ -461,13 +462,24 @@ export async function generateAutomaticCertificate(params: {
     qrY + padding + qrSize + captionHeight * 0.35
   );
 
-  // Draw Student ID
+  // Draw Student KR8 ID (not internal UUID) and certificate_code in footer
   ctx.fillStyle = "#7a1fa8";
   ctx.font = `bold ${Math.round(qrSize * 0.062)}px monospace`;
+  const printedKr8Id = (student as any).kr8_id || student.id;
   ctx.fillText(
-    student.id,
+    printedKr8Id,
     qrX + cardWidth / 2,
     qrY + padding + qrSize + captionHeight * 0.75
+  );
+
+  // Footer shows certificate_code, not cert.id
+  ctx.fillStyle = "#5a2a6b";
+  ctx.font = `${Math.round(qrSize * 0.05)}px monospace`;
+  ctx.textAlign = "center";
+  ctx.fillText(
+    certId,
+    width / 2,
+    height - Math.round(height * 0.02)
   );
 
   // Lossless PNG data URL ensures QR codes have zero DCT block artifacts or ringing
@@ -552,10 +564,12 @@ export async function getCertificateData(
 /**
  * Resolves the certificate image URL synchronously from cache,
  * or asynchronously from IndexedDB or dynamic canvas generation.
+ * FIX: Must pass saved certificate_code as certId and use kr8_id in QR URL
  */
 export async function resolveCertificateImageUrl(
   cert: {
     id: string;
+    certificate_code?: string;
     studentId: string;
     studentName: string;
     formattedName?: string;
@@ -566,58 +580,81 @@ export async function resolveCertificateImageUrl(
     achievementText?: string;
     additionalNotes?: string;
     certificateImageUrl?: string;
+    kr8_id?: string;
   },
   student?: Account,
   origin?: string
 ): Promise<string> {
-  // 1. In-memory cache hit
+  const certCode = (cert as any).certificate_code || cert.id;
+  // Regenerate images when code differs - check cache by code
+  if (imageCache.has(certCode)) {
+    return imageCache.get(certCode)!;
+  }
   if (imageCache.has(cert.id)) {
-    return imageCache.get(cert.id)!;
+    // If cached id differs from code, regenerate
+    const cached = imageCache.get(cert.id)!;
+    if (certCode !== cert.id) {
+      // code differs, need regenerate
+    } else {
+      return cached;
+    }
   }
   if (cert.studentId && imageCache.has(cert.studentId)) {
     return imageCache.get(cert.studentId)!;
   }
 
-  // 2. Direct valid data URL or HTTP image
+  // 2. Direct valid data URL or HTTP image - but ensure code matches, otherwise regenerate
   if (
     cert.certificateImageUrl &&
     (cert.certificateImageUrl.startsWith("data:image/") || cert.certificateImageUrl.startsWith("http"))
   ) {
-    imageCache.set(cert.id, cert.certificateImageUrl);
-    return cert.certificateImageUrl;
+    // If certificate_code exists and image was generated with old made-up code, regenerate
+    if ((cert as any).certificate_code && cert.certificateImageUrl.includes("CERT-KR8-") && !cert.certificateImageUrl.includes((cert as any).certificate_code)) {
+      // fall through to regenerate
+    } else {
+      imageCache.set(certCode, cert.certificateImageUrl);
+      imageCache.set(cert.id, cert.certificateImageUrl);
+      return cert.certificateImageUrl;
+    }
   }
 
-  // 3. Check IndexedDB by cert.id then studentId
+  // 3. Check IndexedDB by cert_code then cert.id then studentId
   try {
     const idbData =
+      (await getCertificateData(certCode)) ||
       (await getCertificateData(cert.id)) ||
       (cert.studentId ? await getCertificateData(cert.studentId) : null);
     if (idbData?.imageUrl && idbData.imageUrl.startsWith("data:image/")) {
-      imageCache.set(cert.id, idbData.imageUrl);
+      // Ensure code matches
+      imageCache.set(certCode, idbData.imageUrl);
       return idbData.imageUrl;
     }
   } catch {
     /* ignore */
   }
 
-  // 4. Dynamic on-the-fly rendering using canvas
+  // 4. Dynamic on-the-fly rendering using canvas - pass certificate_code as certId and kr8_id
   try {
+    const kr8Id = (cert as any).kr8_id || (student as any)?.kr8_id || cert.studentId;
     const fallbackStudent: Account = student || ({
       id: cert.studentId,
+      kr8_id: kr8Id,
       name: cert.studentName,
       skill: cert.skill,
-    } as Account);
+    } as any);
 
     const rendered = await generateAutomaticCertificate({
-      student: fallbackStudent,
+      student: { ...fallbackStudent, kr8_id: kr8Id } as any,
       skillKey: cert.skill,
       tier: cert.tier,
       courseName: cert.skillName,
       additionalNotes: cert.additionalNotes || "",
       origin: origin || (typeof window !== "undefined" ? window.location.origin : "https://kr8digitals.com"),
+      certId: certCode,
     });
 
     if (rendered?.imageUrl) {
+      imageCache.set(certCode, rendered.imageUrl);
       imageCache.set(cert.id, rendered.imageUrl);
       saveCertificateData(
         cert.studentId,
@@ -626,7 +663,7 @@ export async function resolveCertificateImageUrl(
           imageUrl: rendered.imageUrl,
           pdfBytes: rendered.pdfBytes,
         },
-        cert.id
+        certCode
       ).catch(() => {});
       return rendered.imageUrl;
     }
@@ -635,7 +672,7 @@ export async function resolveCertificateImageUrl(
   }
 
   // 5. Template fallback
-  return cert.templateUrl || "/certificates/reusable_completion.png";
+  return (cert as any).templateUrl || "/certificates/reusable_completion.png";
 }
 
 export async function processGraduationCertificate(

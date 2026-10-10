@@ -1,5 +1,5 @@
-.live-hub{--l-bg:#0B0710;--l-s:#19111F;--l-a:#ED3AAE;--l-t:#F8F2F8;--l-m:#978A9C;background:var(--l-bg);color:var(--l-t);font-family:"Work Sans",system-ui,sans-serif}
-.live-serif{font-family:"Instrument Serif",Georgia,serif;font-weight:400;letter-spacing:-.01em;line-height:1.02}
+.live-hub{--l-bg:#0B0710;--l-s:#19111F;--l-a:#ED3AAE;--l-t:#F8F2F8;--l-m:#978A9C;background:var(--l-bg);color:var(--l-t);font-family:"Inter",system-ui,sans-serif}
+.live-serif{font-family:"Sora","Space Grotesk",system-ui,sans-serif;font-weight:700;letter-spacing:-0.02em;line-height:1.02}
 .live-meta{color:var(--l-m)}
 .live-kicker{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--l-a)}
 .live-page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1.5rem;border-bottom:1px solid rgb(248 242 248/.08);padding-bottom:2rem}

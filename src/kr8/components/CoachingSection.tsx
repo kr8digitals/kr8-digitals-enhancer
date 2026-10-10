@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useEffect } from "react";
 import { GradientButton } from "./ui";
 import { saveClientRequest } from "../data/store";

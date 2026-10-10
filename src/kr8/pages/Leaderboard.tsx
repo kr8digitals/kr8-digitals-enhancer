@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Pill, Card } from "../components/ui";
 import LeaderboardList from "../components/LeaderboardList";
 import { SCORING } from "../data/store";

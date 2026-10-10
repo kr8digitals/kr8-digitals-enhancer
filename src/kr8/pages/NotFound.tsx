@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Link } from "../router-shim";
 import { Pill, GradientButton, GhostButton } from "../components/ui";
 import { useSeo } from "../lib/useSeo";

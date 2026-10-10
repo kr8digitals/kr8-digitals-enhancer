@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { SVGProps } from "react";
 
 export type IconName =

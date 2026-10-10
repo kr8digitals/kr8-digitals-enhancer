@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Mindset Shift — Supabase synchronization (mirrors src/lib/supabaseSync.ts)
  *

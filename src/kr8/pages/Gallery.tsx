@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   getGalleryItems,
+  getGalleryItemsAsync,
   addGalleryItem,
   type GalleryItem,
 } from "../data/store";
@@ -28,9 +28,9 @@ export default function Gallery() {
   });
   const { student, addNotification } = useAuth();
   const [filter, setFilter] = useState<string>("All");
-  const [items, setItems] = useState<GalleryItem[]>(() =>
-    getGalleryItems({ status: "approved" })
-  );
+  const [items, setItems] = useState<GalleryItem[]>(() => {
+    try { const sync = getGalleryItems({ status: "approved" }); return Array.isArray(sync) ? sync : []; } catch { return []; }
+  });
   const [lightboxItem, setLightboxItem] = useState<GalleryItem | null>(null);
 
   // Viewer Submission Modal State
@@ -49,14 +49,20 @@ export default function Gallery() {
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
 
   useEffect(() => {
-    const handleUpdate = () => {
-      setItems(getGalleryItems({ status: "approved", category: filter }));
+    const handleUpdate = async () => {
+      try {
+        const asyncItems = await getGalleryItemsAsync({ status: "approved", category: filter });
+        setItems(Array.isArray(asyncItems) ? asyncItems : getGalleryItems({ status: "approved", category: filter }));
+      } catch {
+        try { setItems(getGalleryItems({ status: "approved", category: filter })); } catch { setItems([]); }
+      }
     };
-    window.addEventListener("kr8:gallery-updated", handleUpdate);
-    return () => window.removeEventListener("kr8:gallery-updated", handleUpdate);
+    handleUpdate();
+    window.addEventListener("kr8:gallery-updated", handleUpdate as any);
+    return () => window.removeEventListener("kr8:gallery-updated", handleUpdate as any);
   }, [filter]);
 
-  const filteredItems = items.filter((item) => {
+  const filteredItems = (Array.isArray(items) ? items : []).filter((item) => {
     if (filter === "All") return true;
     return item.category === filter;
   });

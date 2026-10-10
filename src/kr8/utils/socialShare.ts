@@ -1,4 +1,3 @@
-// @ts-nocheck
 import QRCode from "qrcode";
 import type { CertificateRecord, Account } from "../data/store";
 import { resolveCertificateImageUrl } from "./certificate";

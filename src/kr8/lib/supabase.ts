@@ -1,26 +1,18 @@
-// @ts-nocheck
+// KR8 Digitals Supabase - Production (no Lovable dependency)
+// Uses VITE_ env vars only, no hardcoded fallbacks
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// KR8 Digitals database (Lovable Cloud)
-const DEFAULT_SUPABASE_URL = "https://zvdkzldiabedjsxhwvbm.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_tjWargPs1GiV1boWO1dtRg_7T8Curil";
+function getSupabaseEnv() {
+  const env = (import.meta as any).env || {};
+  const envUrl = env['VITE_SUPABASE_URL'] as string | undefined;
+  const envKey = env['VITE_SUPABASE_PUBLISHABLE_KEY'] as string | undefined
+    || env['VITE_SUPABASE_ANON_KEY'] as string | undefined;
 
-const getSupabaseEnv = () => {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const envKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-  if (typeof window !== "undefined") {
-    try {
-      // Old saved overrides pointed at the retired database
-      localStorage.removeItem("kr8_supabase_url");
-      localStorage.removeItem("kr8_supabase_anon_key");
-    } catch {
-      /* ignore */
-    }
-  }
-  const url = (envUrl || DEFAULT_SUPABASE_URL).trim();
-  const anonKey = (envKey || DEFAULT_SUPABASE_ANON_KEY).trim();
+  const url = (envUrl || "").trim();
+  const anonKey = (envKey || "").trim();
   return { url, anonKey };
-};
+}
 
 let clientInstance: SupabaseClient | null = null;
 
@@ -55,20 +47,6 @@ export function getSupabase(): SupabaseClient | null {
 
 export function isSupabaseConnected(): boolean {
   return getSupabase() !== null;
-}
-
-export function saveSupabaseConfig(url: string, anonKey: string): boolean {
-  try {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("kr8_supabase_url", url.trim());
-      localStorage.setItem("kr8_supabase_anon_key", anonKey.trim());
-      clientInstance = null; // reset client instance to reload with new keys
-      window.dispatchEvent(new Event("kr8:supabase-configured"));
-    }
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function getStoredSupabaseConfig() {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useEffect } from "react";
 import { Link } from "../router-shim";
 import { CONTACT, getSocialLinks } from "../data/store";

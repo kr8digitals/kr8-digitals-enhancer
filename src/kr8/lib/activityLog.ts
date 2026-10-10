@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getSupabase } from "./supabase";
 
 /** Record a user activity in the shared activity log (fire-and-forget). */
@@ -8,8 +7,10 @@ export function logActivity(action: string, opts: { actorId?: string; actorName?
   let actorId = opts.actorId, actorName = opts.actorName;
   if (!actorId && typeof window !== "undefined") {
     try {
-      const cur = JSON.parse(localStorage.getItem("kr8_current") || "null");
-      actorId = cur?.id; actorName = actorName || cur?.name;
+      if (typeof localStorage !== "undefined") {
+        const cur = JSON.parse(localStorage.getItem("kr8_current") || "null");
+        actorId = cur?.id; actorName = actorName || cur?.name;
+      }
     } catch { /* ignore */ }
   }
   supabase.from("activity_log").insert({

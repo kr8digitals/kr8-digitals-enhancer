@@ -137,6 +137,19 @@ function matchRoutes(children: ReactNode, pathname: string): ReactNode | undefin
     }
     const norm = pathname.replace(/\/+$/, "") || "/";
     if (path === norm) return element;
+    if (path.includes(':')) {
+      const pathParts = path.split('/').filter(Boolean);
+      const normParts = norm.split('/').filter(Boolean);
+      if (pathParts.length === normParts.length) {
+        let match = true;
+        for (let i = 0; i < pathParts.length; i++) {
+          if (pathParts[i].startsWith(':')) continue;
+          if (pathParts[i] !== normParts[i]) { match = false; break; }
+        }
+        if (match) return element;
+      }
+    }
+    if (path === '/go/:slug' && norm.startsWith('/go/')) return element;
   }
   return fallback;
 }

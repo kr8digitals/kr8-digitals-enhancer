@@ -30,3 +30,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vercel/
+dist/
+.env
+backups/
+google_drive/
+Unselected files/
+*.bak
+

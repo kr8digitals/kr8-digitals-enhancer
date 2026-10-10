@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -67,7 +66,7 @@ function RecordingCard({ recording }) {
 
 function StartForm({ me, onStarted }) {
   const create = useServerFn(createRoom);
-  const [form, setForm] = useState({ title: "", description: "", mode: "meeting", visibility: "public", waitingRoom: false });
+  const [form, setForm] = useState({ title: "", description: "", mode: "meeting", visibility: "public", waitingRoom: false, roomType: "video" }); // Video or Audio choice
   const [busy, setBusy] = useState(false);
   const submit = async (event) => {
     event.preventDefault();

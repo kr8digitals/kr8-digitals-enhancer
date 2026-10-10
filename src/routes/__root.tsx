@@ -77,23 +77,29 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "KR8 Digitals" },
-      { name: "description", content: "KR8 Digitals — tuition-free creative academy, tribe community and digital agency." },
+      { title: "KR8 Digitals — Learn Free. Belong Deeply. Build for Real." },
+      { name: "description", content: "KR8 Digitals — tuition-free creative academy, tribe community and digital agency. Learn free, belong deeply, build for real." },
       { name: "author", content: "KR8 Digitals" },
-      { property: "og:title", content: "KR8 Digitals" },
-      { property: "og:description", content: "Tuition-free creative academy, tribe community and digital agency." },
+      { property: "og:title", content: "KR8 Digitals — Learn Free. Belong Deeply. Build for Real." },
+      { property: "og:description", content: "Tuition-free creative academy, tribe community and digital agency. Learn free, belong deeply, build for real." },
       { property: "og:type", content: "website" },
+      { property: "og:image", content: "/og-image.png" },
+      { property: "og:url", content: "https://www.kr8digitals.com" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@KR8Digitals" },
+      { name: "twitter:title", content: "KR8 Digitals — Learn Free. Belong Deeply. Build for Real." },
+      { name: "twitter:description", content: "Tuition-free creative academy, tribe community and digital agency." },
+      { name: "twitter:image", content: "/og-image.png" },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+      { rel: "icon", href: "/favicon.png", type: "image/png", sizes: "192x192" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Work+Sans:wght@400;500;600;700&family=Sora:wght@400;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" as any },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Sora:wght@400;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" },
     ],
   }),
   shellComponent: RootShell,
@@ -121,7 +127,6 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
     </QueryClientProvider>
   );

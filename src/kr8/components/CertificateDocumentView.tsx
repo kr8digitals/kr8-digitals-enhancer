@@ -1,12 +1,10 @@
-// @ts-nocheck
 import { useState, useEffect } from "react";
-import type { CertificateRecord, Account } from "../data/store";
 import { resolveCertificateImageUrl } from "../utils/certificate";
 import Icon from "./Icon";
 
 interface CertificateDocumentViewProps {
-  cert: CertificateRecord;
-  student?: Account;
+  cert: any;
+  student?: any;
   className?: string;
   maxHeight?: string;
   onLoaded?: (imageUrl: string) => void;
@@ -20,42 +18,81 @@ export default function CertificateDocumentView({
   onLoaded,
 }: CertificateDocumentViewProps) {
   const [imageUrl, setImageUrl] = useState<string>(() => {
-    if (cert.certificateImageUrl && cert.certificateImageUrl.startsWith("data:image/")) {
-      return cert.certificateImageUrl;
-    }
+    try {
+      if (cert?.certificateImageUrl && cert.certificateImageUrl.startsWith("data:image/")) {
+        return cert.certificateImageUrl;
+      }
+      if (cert?.certificate_image_url && cert.certificate_image_url.startsWith("data:image/")) {
+        return cert.certificate_image_url;
+      }
+    } catch {}
     return "";
   });
   const [loading, setLoading] = useState(!imageUrl);
 
   useEffect(() => {
     let active = true;
-
-    if (cert.certificateImageUrl && cert.certificateImageUrl.startsWith("data:image/")) {
-      setImageUrl(cert.certificateImageUrl);
+    if (!cert) {
       setLoading(false);
-      onLoaded?.(cert.certificateImageUrl);
+      return;
+    }
+
+    const certImg = cert.certificateImageUrl || cert.certificate_image_url;
+    if (certImg && certImg.startsWith("data:image/")) {
+      setImageUrl(certImg);
+      setLoading(false);
+      onLoaded?.(certImg);
       return;
     }
 
     setLoading(true);
-    resolveCertificateImageUrl(cert, student)
-      .then((url) => {
-        if (!active) return;
-        setImageUrl(url);
+    try {
+      const safeCert = {
+        id: cert.id || cert.certificate_code || "cert",
+        studentId: cert.studentId || cert.student_id || cert.kr8_id || "",
+        studentName: cert.studentName || cert.student_name || "Student",
+        formattedName: cert.formattedName || cert.formatted_name || cert.student_name || "STUDENT",
+        skill: cert.skill || "graphic",
+        skillName: cert.skillName || cert.skill_name || cert.skill || "Graphic Design",
+        tier: cert.tier || "Completion",
+        templateUrl: cert.templateUrl || cert.template_url,
+        achievementText: cert.achievementText || cert.achievement_text,
+        additionalNotes: cert.additionalNotes || cert.additional_notes,
+        certificateImageUrl: certImg,
+      };
+      resolveCertificateImageUrl(safeCert as any, student)
+        .then((url) => {
+          if (!active) return;
+          setImageUrl(url);
+          setLoading(false);
+          onLoaded?.(url);
+        })
+        .catch((err) => {
+          console.warn("Failed to resolve certificate image:", err);
+          if (!active) return;
+          setImageUrl(safeCert.templateUrl || "/certificates/reusable_completion.png");
+          setLoading(false);
+        });
+    } catch (e) {
+      console.warn("CertificateDocumentView exception", e);
+      if (active) {
+        setImageUrl("/certificates/reusable_completion.png");
         setLoading(false);
-        onLoaded?.(url);
-      })
-      .catch((err) => {
-        console.warn("Failed to resolve certificate image:", err);
-        if (!active) return;
-        setImageUrl(cert.templateUrl || "/certificates/reusable_completion.png");
-        setLoading(false);
-      });
+      }
+    }
 
     return () => {
       active = false;
     };
-  }, [cert.id, cert.certificateImageUrl, cert.tier, cert.skill, student?.id]);
+  }, [cert?.id, cert?.certificate_code, cert?.certificateImageUrl, cert?.certificate_image_url, cert?.tier, cert?.skill, student?.id]);
+
+  if (!cert) {
+    return (
+      <div className={`rounded-2xl border border-white/10 bg-black/40 p-6 text-center ${className}`}>
+        <p className="text-xs text-[#8a7ba8]">No certificate data</p>
+      </div>
+    );
+  }
 
   return (
     <div className={`group relative overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl ${className}`}>
@@ -71,20 +108,23 @@ export default function CertificateDocumentView({
         </div>
       ) : (
         <img
-          src={imageUrl}
-          alt={`Official Certificate of ${cert.formattedName || cert.studentName}`}
+          src={imageUrl || "/certificates/reusable_completion.png"}
+          alt={`Official Certificate of ${cert.formattedName || cert.formatted_name || cert.studentName || cert.student_name || "Student"}`}
           className="w-full object-contain transition-opacity duration-300"
           style={{ maxHeight }}
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.src = "/certificates/reusable_completion.png";
+          }}
         />
       )}
 
-      {/* FOOTER BAR WITH VERIFICATION BADGE & CERT ID */}
       <div className="p-2.5 bg-black/90 text-center border-t border-white/10 flex items-center justify-between px-4">
         <span className="text-[11px] text-green-300 font-semibold flex items-center gap-1">
           <Icon name="check" size={12} /> Includes verifiable QR code
         </span>
         <span className="text-[11px] font-mono text-pink-400">
-          {cert.id}
+          {cert.id || cert.certificate_code || ""}
         </span>
       </div>
     </div>

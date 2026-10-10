@@ -1,25 +1,20 @@
-// @ts-nocheck
+// Production Register Page - Supabase Auth, server-generated KR8 ID, DB-first skills
 import { useState, useEffect } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link, Navigate, useNavigate, useSearchParams } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
-import {
-  getSkills,
-  areAllRegistrationsClosed,
-  registerStudent,
-  registerTribe,
-  buildPhone,
-  countryByCode,
-  getSkillRegistration,
-} from "../data/store";
+import { getSkills, areAllRegistrationsClosed, getSkillRegistration, buildPhone, countryByCode } from "../data/store";
 import { Card, GradientButton, Pill } from "../components/ui";
 import CountryPhone from "../components/CountryPhone";
+import { supabase } from "@/integrations/supabase/client";
+
+type DbSkill = { skill_key: string; name: string; reg_open: boolean; available: boolean; sort_order: number };
 
 export default function RegisterPage() {
   useSeo({ path: "/register", noindex: true });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, signIn, addNotification } = useAuth();
+  const { user, signUp, loading: authLoading } = useAuth();
 
   const initialSkill = searchParams.get("skill") || "";
   const initialType = searchParams.get("type") === "tribe" ? "tribe" : "student";
@@ -27,423 +22,269 @@ export default function RegisterPage() {
   const initialName = searchParams.get("name") || "";
 
   const [tab, setTab] = useState<"student" | "tribe">(initialType);
-
   const allRegistrationsClosed = areAllRegistrationsClosed();
 
-  if (allRegistrationsClosed && tab === "student") {
-    return <Navigate to="/waitlist" replace />;
-  }
-
-  // Student form state
-  const [studentForm, setStudentForm] = useState({
-    name: initialName,
-    email: initialEmail,
-    phone: "",
-    country: "NG",
-    password: "",
-    skill: initialSkill,
-    y: "",
-    m: "",
-    d: "",
-  });
-
-  // Tribe form state
-  const [tribeForm, setTribeForm] = useState({
-    name: initialName,
-    email: initialEmail,
-    phone: "",
-    country: "NG",
-    password: "",
-  });
-
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [studentForm, setStudentForm] = useState({ name: initialName, email: initialEmail, phone: "", country: "NG", password: "", skill: initialSkill, y: "", m: "", d: "" });
+  const [tribeForm, setTribeForm] = useState({ name: initialName, email: initialEmail, phone: "", country: "NG", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [dbSkills, setDbSkills] = useState<DbSkill[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(true);
 
   useEffect(() => {
-    if (initialSkill) {
-      setStudentForm((prev) => ({ ...prev, skill: initialSkill }));
-    }
-  }, [initialSkill]);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        // Visitors: select only skill_key,name,reg_open,available,sort_order
+        const { data, error } = await supabase.from('skill_settings').select('skill_key,name,reg_open,available,sort_order').order('sort_order');
+        if (error) throw error;
+        if (!cancelled && data) {
+          setDbSkills(data as any);
+        }
+      } catch (e) {
+        console.warn('skill_settings load error', e);
+        // fallback to hardcoded
+      } finally {
+        if (!cancelled) setSkillsLoading(false);
+      }
+    };
+    load();
+    const iv = setInterval(load, 60000); // 60s polling, quota safe
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
 
-  const currentYear = new Date().getFullYear();
-  // No age restrictions: span from current year down to 1920
-  const years = Array.from({ length: currentYear - 1920 + 1 }, (_, i) => currentYear - i);
-  const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
-  const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
+  // Use DB skills if available, else fallback
+  const allSkillsSource = dbSkills.length
+    ? dbSkills.filter(s=>s.available).map(s=>({ key: s.skill_key, name: s.name, available: s.available, regOpen: s.reg_open }))
+    : getSkills().filter(s => s.available).map(s=>({ key: s.key, name: s.name, available: s.available, regOpen: s.regOpen }));
+  const openSkills = allSkillsSource.filter((s:any)=>s.regOpen);
+  const closedSkills = allSkillsSource.filter((s:any)=>!s.regOpen);
+  const skills = openSkills; // Only show skills where reg_open true on register and academy pages
 
-  const inputCls =
-    "w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none";
+  const allClosedFromDB = dbSkills.length ? dbSkills.filter(s=>s.available).every(s=>!s.reg_open) : false;
 
-  const handleStudentSubmit = (e: React.FormEvent) => {
+  if ((allRegistrationsClosed || allClosedFromDB) && tab === "student" && !skillsLoading) {
+    // Instead of redirect, show closed message with list
+    // But keep tribe open
+  }
+
+  const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-
-    if (
-      !studentForm.name.trim() ||
-      !studentForm.email.trim() ||
-      !studentForm.phone.trim() ||
-      !studentForm.password ||
-      !studentForm.skill ||
-      !studentForm.y ||
-      !studentForm.m ||
-      !studentForm.d
-    ) {
-      setError("Please fill in every field, including full name, email, phone, password, skill, and birth date.");
+    setStatusMsg(null);
+    if (!studentForm.name.trim() || !studentForm.email.trim() || !studentForm.phone.trim() || !studentForm.password) {
+      setStatusMsg({ type: "error", text: "Please fill all required fields" });
       return;
     }
-
     if (studentForm.password.length < 6) {
-      setError("Password must be at least 6 characters.");
+      setStatusMsg({ type: "error", text: "Password must be at least 6 characters" });
+      return;
+    }
+    if (!studentForm.skill) {
+      setStatusMsg({ type: "error", text: "Please select a skill" });
+      return;
+    }
+    // Check reg_open from DB
+    const selected = allSkillsSource.find((s:any)=>s.key===studentForm.skill);
+    if (selected && !selected.regOpen) {
+      setStatusMsg({ type: "error", text: "Registration for this skill is closed" });
+      return;
+    }
+    const skillReg = getSkillRegistration(studentForm.skill);
+    if (skillReg === false) {
+      setStatusMsg({ type: "error", text: "Registration for this skill is closed" });
       return;
     }
 
-    const dial = countryByCode(studentForm.country)?.dial || "+234";
-    const res = registerStudent({
-      name: studentForm.name.trim(),
-      email: studentForm.email.trim(),
-      phone: buildPhone(dial, studentForm.phone),
-      country: studentForm.country,
-      password: studentForm.password,
-      skill: studentForm.skill,
-      dob: `${studentForm.y}-${studentForm.m}-${studentForm.d}`,
-    });
-
-    if (!res.ok || !res.student) {
-      setError(res.error || "Registration could not be completed. Please check your information.");
-      return;
-    }
-
-    signIn(res.student);
+    setLoading(true);
     try {
-      sessionStorage.setItem("kr8_just_registered", res.student.id);
-    } catch {
-      /* ignore */
+      const dial = countryByCode(studentForm.country)?.dial || "+234";
+      const phone = buildPhone(dial, studentForm.phone);
+      const dob = studentForm.y && studentForm.m && studentForm.d ? `${studentForm.y}-${studentForm.m}-${studentForm.d}` : undefined;
+      const signUpData: any = { name: studentForm.name.trim(), email: studentForm.email.trim(), phone, password: studentForm.password, country: studentForm.country, skill: studentForm.skill };
+      if (dob) signUpData.dob = dob;
+      const result = await signUp(signUpData);
+      if (result.ok) {
+        setStatusMsg({ type: "success", text: `Check your email to confirm - your account is created! KR8 ID: ${(result as any).kr8_id || 'generated'}. Confirmation email sent - check spam too. After confirming, sign in on any device.` });
+        setTimeout(() => navigate("/signin?registered=true"), 2500);
+      } else {
+        const errText = result.error || "Registration failed";
+        // If sign-up fails Database error saving new user show Registration for this skill is closed
+        if (errText.toLowerCase().includes('database error saving new user') || errText.toLowerCase().includes('database error')) {
+          setStatusMsg({ type: "error", text: "Registration for this skill is closed" });
+        } else {
+          setStatusMsg({ type: "error", text: errText });
+        }
+      }
+    } catch (err: any) {
+      const msg = err.message || "Registration failed";
+      if (msg.toLowerCase().includes('database error saving new user')) {
+        setStatusMsg({ type: "error", text: "Registration for this skill is closed" });
+      } else {
+        setStatusMsg({ type: "error", text: msg });
+      }
+    } finally {
+      setLoading(false);
     }
-    addNotification("Registration successful! Welcome to KR8 Academy.");
-    navigate("/academy?registered=true");
   };
 
-  const handleTribeSubmit = (e: React.FormEvent) => {
+  const handleTribeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-
+    setStatusMsg(null);
     if (!tribeForm.name.trim() || !tribeForm.email.trim() || !tribeForm.phone.trim() || !tribeForm.password) {
-      setError("Please fill in full name, email, phone number, and a password.");
+      setStatusMsg({ type: "error", text: "Please fill all required fields" });
       return;
     }
-
     if (tribeForm.password.length < 6) {
-      setError("Password must be at least 6 characters.");
+      setStatusMsg({ type: "error", text: "Password must be at least 6 characters" });
       return;
     }
-
-    const dial = countryByCode(tribeForm.country)?.dial || "+234";
-    const res = registerTribe({
-      name: tribeForm.name.trim(),
-      email: tribeForm.email.trim(),
-      phone: buildPhone(dial, tribeForm.phone),
-      country: tribeForm.country,
-      password: tribeForm.password,
-    });
-
-    if (!res.ok || !res.member) {
-      setError(res.error || "Could not register Tribe member.");
-      return;
-    }
-
-    signIn(res.member);
+    setLoading(true);
     try {
-      sessionStorage.setItem("kr8_just_registered", res.member.id);
-    } catch {
-      /* ignore */
+      const dial2 = countryByCode(tribeForm.country)?.dial || "+234";
+      const phone = buildPhone(dial2, tribeForm.phone);
+      const result = await signUp({ name: tribeForm.name.trim(), email: tribeForm.email.trim(), phone, password: tribeForm.password, country: tribeForm.country, skill: "tribe" });
+      if (result.ok) {
+        setStatusMsg({ type: "success", text: "Check your email to confirm - tribe account created! Confirmation email sent, check spam too. After confirming, sign in on any device." });
+        setTimeout(() => navigate("/signin?registered=true"), 2500);
+      } else {
+        setStatusMsg({ type: "error", text: result.error || "Registration failed" });
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: "error", text: err.message || "Registration failed" });
+    } finally {
+      setLoading(false);
     }
-    addNotification("Welcome to the KR8 Tribe family!");
-    navigate("/tribe?registered=true");
   };
+
+  const inputCls = "w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none";
+  const labelCls = "block text-xs font-semibold text-[#cabfe0] mb-1.5";
 
   return (
     <div className="section-bg min-h-[85vh] py-12 sm:py-16 px-5">
       <div className="mx-auto max-w-2xl">
         <div className="text-center mb-8">
-          <Pill>Official Registration</Pill>
-          <h1 className="font-display mt-4 text-3xl sm:text-5xl font-bold text-white">
-            Create Your <span className="text-gradient">KR8 Account</span>
+          <Pill>Fresh Start - Register From Scratch</Pill>
+          <h1 className="font-display mt-4 text-3xl sm:text-4xl font-bold text-white">
+            Join <span className="text-gradient">KR8 Digitals</span>
           </h1>
-          <p className="mt-3 text-sm sm:text-base text-[#cabfe0]">
-            100% Tuition-Free. Intensive cohorts, verifiable graduation certificates, and lifetime access to our creative network.
+          <p className="mt-3 text-sm text-[#cabfe0] leading-relaxed">
+            100% Tuition-Free. Real authentication - sign in from any device, anywhere. Your KR8 ID is generated securely on server.
           </p>
-
-          {/* Already have an account prompt */}
           <div className="mt-4 flex items-center justify-center gap-2 text-xs sm:text-sm text-[#a594c7]">
             <span>Already have an account?</span>
-            <Link to="/signin" className="font-bold text-pink-400 hover:text-pink-300 underline">
-              Sign In here →
-            </Link>
+            <Link to="/signin" className="font-bold text-pink-400 hover:text-pink-300 underline">Sign In here →</Link>
           </div>
         </div>
 
-        {/* Existing active user alert */}
         {user && (
           <div className="mb-6 rounded-2xl border border-pink-500/40 bg-pink-500/10 p-4 text-center">
-            <p className="text-xs sm:text-sm text-pink-200">
-              You are currently signed in as <span className="font-bold text-white">{user.name}</span> ({user.id}).
-            </p>
-            <div className="mt-3 flex justify-center gap-3">
-              <GradientButton to="/dashboard" className="text-xs px-4 py-2">
-                Go to Dashboard →
-              </GradientButton>
-            </div>
+            <p className="text-xs sm:text-sm text-pink-200">You are signed in as <span className="font-bold text-white">{user.name}</span> ({user.kr8_id}).</p>
+            <Link to="/dashboard" className="mt-2 inline-block text-xs font-bold text-pink-400 underline">Go to Dashboard →</Link>
+          </div>
+        )}
+
+        {statusMsg && (
+          <div className={`mb-6 rounded-xl p-4 text-xs font-semibold ${statusMsg.type === "success" ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : "border border-red-500/40 bg-red-500/15 text-red-200"}`}>
+            {statusMsg.type === "success" ? "✓ " : "✕ "}{statusMsg.text}
           </div>
         )}
 
         <Card className="p-6 sm:p-8">
-          {/* Tab Selector: Student vs Tribe */}
-          <div className="mb-8 flex rounded-full border border-white/10 bg-white/[0.03] p-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setTab("student");
-                setError("");
-              }}
-              className={`flex-1 rounded-full py-2.5 text-xs sm:text-sm font-semibold transition-all ${
-                tab === "student" ? "bg-gradient-pink text-white shadow-lg" : "text-[#b8aecf] hover:text-white"
-              }`}
-            >
-              Academy Student (Full Cohort)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTab("tribe");
-                setError("");
-              }}
-              className={`flex-1 rounded-full py-2.5 text-xs sm:text-sm font-semibold transition-all ${
-                tab === "tribe" ? "bg-gradient-pink text-white shadow-lg" : "text-[#b8aecf] hover:text-white"
-              }`}
-            >
-              Tribe Member (Community Only)
-            </button>
+          <div className="flex rounded-full bg-black/30 p-1 mb-6 border border-white/10">
+            <button onClick={() => setTab("student")} className={`flex-1 rounded-full py-2.5 text-xs font-bold transition ${tab === "student" ? "bg-gradient-pink text-white shadow-lg" : "text-[#8a7ba8] hover:text-white"}`}>Student Registration</button>
+            <button onClick={() => setTab("tribe")} className={`flex-1 rounded-full py-2.5 text-xs font-bold transition ${tab === "tribe" ? "bg-gradient-pink text-white shadow-lg" : "text-[#8a7ba8] hover:text-white"}`}>Tribe Member</button>
           </div>
 
-          {error && (
-            <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/15 p-3.5 text-xs font-semibold text-red-200">
-              {error}
-            </div>
-          )}
-
           {tab === "student" ? (
-            <form onSubmit={handleStudentSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Full Legal Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Samuel Okafor"
-                  className={inputCls}
-                  value={studentForm.name}
-                  onChange={(e) => setStudentForm({ ...studentForm, name: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Real Email Address *
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="name@example.com"
-                  className={inputCls}
-                  value={studentForm.email}
-                  onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })}
-                />
-                <p className="mt-1 text-[11px] text-[#8a7ba8]">
-                  Used for account recovery and linked sign-in methods (including Google).
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Country & Phone Number *
-                </label>
-                <CountryPhone
-                  country={studentForm.country}
-                  phone={studentForm.phone}
-                  onCountry={(country) => setStudentForm({ ...studentForm, country })}
-                  onPhone={(phone) => setStudentForm({ ...studentForm, phone })}
-                  inputClass={inputCls}
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-[#cabfe0]">
-                    Create Password *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-xs text-pink-400 hover:text-pink-300"
-                  >
-                    {showPassword ? "Hide password" : "Show password"}
-                  </button>
+            <>
+              {allClosedFromDB && openSkills.length===0 ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">All skill registrations are currently closed. Please check back later or join waitlist.</div>
+              ) : null}
+              <form onSubmit={handleStudentSubmit} className="space-y-4">
+                <div>
+                  <label className={labelCls}>Full Name *</label>
+                  <input type="text" required placeholder="Your full name" className={inputCls} value={studentForm.name} onChange={e => setStudentForm({ ...studentForm, name: e.target.value })} />
                 </div>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  placeholder="At least 6 characters"
-                  className={inputCls}
-                  value={studentForm.password}
-                  onChange={(e) => setStudentForm({ ...studentForm, password: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Select Your Skill Focus *
-                </label>
-                <select
-                  required
-                  className={inputCls}
-                  value={studentForm.skill}
-                  onChange={(e) => setStudentForm({ ...studentForm, skill: e.target.value })}
-                >
-                  <option value="" className="bg-[#12001f] text-white">Choose a skill track…</option>
-                  {getSkills().filter((s) => s.available).map((s) => (
-                    <option
-                      key={s.key}
-                      value={s.key}
-                      disabled={!getSkillRegistration(s.key)}
-                      className="bg-[#12001f] text-white"
-                    >
-                      {s.name} {!getSkillRegistration(s.key) ? "(Registration Closed)" : "(Cohort Open)"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Date of Birth (All ages welcome) *
-                </label>
-                <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-                  <select
-                    required
-                    className={inputCls}
-                    value={studentForm.y}
-                    onChange={(e) => setStudentForm({ ...studentForm, y: e.target.value })}
-                  >
-                    <option value="" className="bg-[#12001f] text-white">Year</option>
-                    {years.map((y) => (
-                      <option key={y} value={y} className="bg-[#12001f] text-white">
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    required
-                    className={inputCls}
-                    value={studentForm.m}
-                    onChange={(e) => setStudentForm({ ...studentForm, m: e.target.value })}
-                  >
-                    <option value="" className="bg-[#12001f] text-white">Month</option>
-                    {months.map((m) => (
-                      <option key={m} value={m} className="bg-[#12001f] text-white">
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    required
-                    className={inputCls}
-                    value={studentForm.d}
-                    onChange={(e) => setStudentForm({ ...studentForm, d: e.target.value })}
-                  >
-                    <option value="" className="bg-[#12001f] text-white">Day</option>
-                    {days.map((d) => (
-                      <option key={d} value={d} className="bg-[#12001f] text-white">
-                        {d}
-                      </option>
-                    ))}
-                  </select>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>Email *</label>
+                    <input type="email" required placeholder="your@email.com" className={inputCls} value={studentForm.email} onChange={e => setStudentForm({ ...studentForm, email: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Password *</label>
+                    <input type="password" required placeholder="At least 6 characters" className={inputCls} value={studentForm.password} onChange={e => setStudentForm({ ...studentForm, password: e.target.value })} />
+                  </div>
                 </div>
-              </div>
-
-              <div className="pt-3">
-                <GradientButton type="submit" className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold">
-                  Complete Registration & Generate KR8 ID →
-                </GradientButton>
-              </div>
-            </form>
+                <div>
+                  <label className={labelCls}>Phone *</label>
+                  <CountryPhone country={studentForm.country} phone={studentForm.phone} onCountry={(c: string) => setStudentForm({ ...studentForm, country: c })} onPhone={(p: string) => setStudentForm({ ...studentForm, phone: p })} inputClass={inputCls} />
+                  <p className="mt-1 text-[11px] text-[#8a7ba8]">Phone verified ownership for co-founders via OTP. Typing a founder number alone never grants admin.</p>
+                </div>
+                <div>
+                  <label className={labelCls}>Skill Track * {skillsLoading ? "(loading...)" : ""}</label>
+                  <select required className={inputCls} value={studentForm.skill} onChange={e => setStudentForm({ ...studentForm, skill: e.target.value })}>
+                    <option value="">Select a skill</option>
+                    {openSkills.map(s => (
+                      <option key={s.key} value={s.key} className="bg-black text-white">{s.name}</option>
+                    ))}
+                  </select>
+                  {closedSkills.length>0 && (
+                    <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.02] p-2">
+                      <p className="text-[11px] text-[#8a7ba8] font-bold">Registration closed:</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {closedSkills.map(s=>(<span key={s.key} className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-[#8a7ba8]">{s.name} - Registration closed</span>))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className={labelCls}>Date of Birth (Optional)</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input type="text" placeholder="YYYY" className={inputCls} value={studentForm.y} onChange={e => setStudentForm({ ...studentForm, y: e.target.value })} />
+                    <input type="text" placeholder="MM" className={inputCls} value={studentForm.m} onChange={e => setStudentForm({ ...studentForm, m: e.target.value })} />
+                    <input type="text" placeholder="DD" className={inputCls} value={studentForm.d} onChange={e => setStudentForm({ ...studentForm, d: e.target.value })} />
+                  </div>
+                </div>
+                <div className="pt-2">
+                  <GradientButton type="submit" disabled={loading || authLoading} className="w-full py-3.5 text-sm font-bold disabled:opacity-50">
+                    {loading ? "Creating secure account..." : "Create Account & Get KR8 ID →"}
+                  </GradientButton>
+                  <p className="mt-2 text-[11px] text-[#8a7ba8] text-center">KR8 ID generated on server (e.g., KR82026JC0024GDVFD), unique, secure. Works on any device.</p>
+                </div>
+              </form>
+            </>
           ) : (
             <form onSubmit={handleTribeSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Grace Afolayan"
-                  className={inputCls}
-                  value={tribeForm.name}
-                  onChange={(e) => setTribeForm({ ...tribeForm, name: e.target.value })}
-                />
+                <label className={labelCls}>Full Name *</label>
+                <input type="text" required placeholder="Your name" className={inputCls} value={tribeForm.name} onChange={e => setTribeForm({ ...tribeForm, name: e.target.value })} />
               </div>
-
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Email *</label>
+                  <input type="email" required placeholder="your@email.com" className={inputCls} value={tribeForm.email} onChange={e => setTribeForm({ ...tribeForm, email: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Password *</label>
+                  <input type="password" required placeholder="At least 6 chars" className={inputCls} value={tribeForm.password} onChange={e => setTribeForm({ ...tribeForm, password: e.target.value })} />
+                </div>
+              </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="name@example.com"
-                  className={inputCls}
-                  value={tribeForm.email}
-                  onChange={(e) => setTribeForm({ ...tribeForm, email: e.target.value })}
-                />
+                <label className={labelCls}>Phone *</label>
+                <CountryPhone country={tribeForm.country} phone={tribeForm.phone} onCountry={(c: string) => setTribeForm({ ...tribeForm, country: c })} onPhone={(p: string) => setTribeForm({ ...tribeForm, phone: p })} inputClass={inputCls} />
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Country & Phone Number *
-                </label>
-                <CountryPhone
-                  country={tribeForm.country}
-                  phone={tribeForm.phone}
-                  onCountry={(country) => setTribeForm({ ...tribeForm, country })}
-                  onPhone={(phone) => setTribeForm({ ...tribeForm, phone })}
-                  inputClass={inputCls}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#cabfe0] mb-1.5">
-                  Create Password *
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="At least 6 characters"
-                  className={inputCls}
-                  value={tribeForm.password}
-                  onChange={(e) => setTribeForm({ ...tribeForm, password: e.target.value })}
-                />
-              </div>
-
-              <div className="pt-3">
-                <GradientButton type="submit" className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold">
-                  Join the Tribe Family (100% Free) →
+              <div className="pt-2">
+                <GradientButton type="submit" disabled={loading || authLoading} className="w-full py-3.5 text-sm font-bold disabled:opacity-50">
+                  {loading ? "Joining..." : "Join Tribe (Secure, Cross-Device) →"}
                 </GradientButton>
               </div>
             </form>
           )}
         </Card>
+
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center">
+          <p className="text-xs text-[#8a7ba8] leading-relaxed"><strong className="text-white">Security:</strong> Founder role granted only after email verification. Phone numbers alone never grant admin - requires OTP verification or founder promotion.</p>
+        </div>
       </div>
     </div>
   );

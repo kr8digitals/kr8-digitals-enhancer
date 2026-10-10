@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SplatRouteImport } from './routes/$'
-import { Route as ApiPublicLiveAdminRouteImport } from './routes/api/public/live-admin'
+import { Route as ApiVerifyRouteImport } from './routes/api/verify'
 import { Route as ApiPublicLivekitWebhookRouteImport } from './routes/api/public/livekit/webhook'
 
 const IndexRoute = IndexRouteImport.update({
@@ -24,9 +24,9 @@ const SplatRoute = SplatRouteImport.update({
   path: '/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicLiveAdminRoute = ApiPublicLiveAdminRouteImport.update({
-  id: '/api/public/live-admin',
-  path: '/api/public/live-admin',
+const ApiVerifyRoute = ApiVerifyRouteImport.update({
+  id: '/api/verify',
+  path: '/api/verify',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicLivekitWebhookRoute = ApiPublicLivekitWebhookRouteImport.update({
@@ -38,40 +38,34 @@ const ApiPublicLivekitWebhookRoute = ApiPublicLivekitWebhookRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/api/public/live-admin': typeof ApiPublicLiveAdminRoute
+  '/api/verify': typeof ApiVerifyRoute
   '/api/public/livekit/webhook': typeof ApiPublicLivekitWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/api/public/live-admin': typeof ApiPublicLiveAdminRoute
+  '/api/verify': typeof ApiVerifyRoute
   '/api/public/livekit/webhook': typeof ApiPublicLivekitWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/api/public/live-admin': typeof ApiPublicLiveAdminRoute
+  '/api/verify': typeof ApiVerifyRoute
   '/api/public/livekit/webhook': typeof ApiPublicLivekitWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    '/' | '/$' | '/api/public/live-admin' | '/api/public/livekit/webhook'
+  fullPaths: '/' | '/$' | '/api/verify' | '/api/public/livekit/webhook'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$' | '/api/public/live-admin' | '/api/public/livekit/webhook'
-  id:
-    | '__root__'
-    | '/'
-    | '/$'
-    | '/api/public/live-admin'
-    | '/api/public/livekit/webhook'
+  to: '/' | '/$' | '/api/verify' | '/api/public/livekit/webhook'
+  id: '__root__' | '/' | '/$' | '/api/verify' | '/api/public/livekit/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SplatRoute: typeof SplatRoute
-  ApiPublicLiveAdminRoute: typeof ApiPublicLiveAdminRoute
+  ApiVerifyRoute: typeof ApiVerifyRoute
   ApiPublicLivekitWebhookRoute: typeof ApiPublicLivekitWebhookRoute
 }
 
@@ -91,11 +85,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/live-admin': {
-      id: '/api/public/live-admin'
-      path: '/api/public/live-admin'
-      fullPath: '/api/public/live-admin'
-      preLoaderRoute: typeof ApiPublicLiveAdminRouteImport
+    '/api/verify': {
+      id: '/api/verify'
+      path: '/api/verify'
+      fullPath: '/api/verify'
+      preLoaderRoute: typeof ApiVerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/livekit/webhook': {
@@ -111,7 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
-  ApiPublicLiveAdminRoute: ApiPublicLiveAdminRoute,
+  ApiVerifyRoute: ApiVerifyRoute,
   ApiPublicLivekitWebhookRoute: ApiPublicLivekitWebhookRoute,
 }
 export const routeTree = rootRouteImport

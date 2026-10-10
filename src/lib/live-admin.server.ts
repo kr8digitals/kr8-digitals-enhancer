@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-// Privileged live-room operations (service role + LiveKit). Server-only.
-// Used directly on hosts that have SUPABASE_SERVICE_ROLE_KEY, and via
-// /api/public/live-admin by hosts that don't (e.g. Vercel).
+// Secure privileged live-room operations (service role + LiveKit)
+// No longer depends on LIVE_ADMIN_URL or Lovable hosting
+// All checks use authenticated userId from Supabase Auth + roles table
 
 async function admin() {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -11,16 +11,23 @@ async function admin() {
 
 async function isHost(userId: string) {
   if (!userId) return false;
-  const db = await admin();
-  const { data } = await db.from("accounts").select("type").eq("id", userId).maybeSingle();
-  return !!data && (data.type === "founder" || data.type === "co-founder");
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  try {
+    const { data } = await supabaseAdmin.from("user_roles").select("role").eq("user_id", userId);
+    return !!data && data.some((r: any) => ["founder", "co-founder", "admin", "coach"].includes(r.role));
+  } catch {
+    // Fallback to legacy accounts table during migration
+    const db = await admin();
+    const { data } = await db.from("accounts").select("type").eq("id", userId).maybeSingle();
+    return !!data && (data.type === "founder" || data.type === "co-founder");
+  }
 }
 
 function lkEnv() {
-  const url = process.env["LIVEKIT_URL"];
-  const key = process.env["LIVEKIT_API_KEY"];
-  const secret = process.env["LIVEKIT_API_SECRET"];
-  if (!url || !key || !secret) throw new Error("Video service is not configured");
+  const url = process.env["LIVEKIT_URL"] || process.env["VITE_LIVEKIT_URL"];
+  const key = process.env["LIVEKIT_API_KEY"] || process.env["VITE_LIVEKIT_API_KEY"];
+  const secret = process.env["LIVEKIT_API_SECRET"] || process.env["VITE_LIVEKIT_API_SECRET"];
+  if (!url || !key || !secret) throw new Error("Video service is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET in Vercel.");
   return { url, key, secret, httpUrl: url.replace(/^wss:/, "https:").replace(/^ws:/, "http:") };
 }
 
@@ -98,13 +105,15 @@ export const liveAdminActions = {
       is_live: true,
     });
     if (error) throw new Error(error.message);
-    await db.from("activity_log").insert({
-      actor_id: data.userId,
-      actor_name: data.userName,
-      action: "live_started",
-      target: data.title,
-      details: { room: id, mode: data.mode },
-    });
+    try {
+      await db.from("activity_log").insert({
+        actor_id: data.userId,
+        actor_name: data.userName,
+        action: "live_started",
+        target: data.title,
+        details: { room: id, mode: data.mode },
+      });
+    } catch {}
     return { id, accessKey: access_key };
   },
 
@@ -116,7 +125,7 @@ export const liveAdminActions = {
     const host = room.host_id === data.userId || (await isHost(data.userId));
 
     if (!host) {
-      if (room.visibility === "private" && (data.accessKey || "").trim().toUpperCase() !== room.access_key) {
+      if (room.visibility === "private" && (data.accessKey || "").trim().toUpperCase() !== (room.access_key || "").toUpperCase()) {
         return { status: "needs_key" as const };
       }
       if (room.waiting_room) {
@@ -153,13 +162,15 @@ export const liveAdminActions = {
       canPublishData: true,
       canUpdateOwnMetadata: true,
     });
-    await db.from("activity_log").insert({
-      actor_id: data.userId,
-      actor_name: data.userName,
-      action: "live_joined",
-      target: room.title,
-      details: { room: room.id },
-    });
+    try {
+      await db.from("activity_log").insert({
+        actor_id: data.userId,
+        actor_name: data.userName,
+        action: "live_joined",
+        target: room.title,
+        details: { room: room.id },
+      });
+    } catch {}
     return { status: "ok" as const, token: await at.toJwt(), url: e.url, isHost: host, room };
   },
 
@@ -177,10 +188,12 @@ export const liveAdminActions = {
     if (data.action === "remove") {
       await rs.removeParticipant(data.roomId, data.targetId);
     } else if (data.action === "mute") {
-      const p = await rs.getParticipant(data.roomId, data.targetId);
-      for (const t of p.tracks) {
-        if (!t.muted) await rs.mutePublishedTrack(data.roomId, data.targetId, t.sid, true);
-      }
+      try {
+        const p = await rs.getParticipant(data.roomId, data.targetId);
+        for (const t of p.tracks) {
+          if (!t.muted) await rs.mutePublishedTrack(data.roomId, data.targetId, t.sid, true);
+        }
+      } catch {}
     } else {
       const speaker = data.action === "make_speaker";
       await rs.updateParticipant(data.roomId, data.targetId, {
@@ -201,7 +214,9 @@ export const liveAdminActions = {
       console.error("deleteRoom", e);
     }
     await db.from("live_rooms").update({ is_live: false, ended_at: new Date().toISOString(), is_recording: false }).eq("id", data.roomId);
-    await db.from("activity_log").insert({ actor_id: data.userId, action: "live_ended", target: room.title, details: { room: room.id } });
+    try {
+      await db.from("activity_log").insert({ actor_id: data.userId, action: "live_ended", target: room.title, details: { room: room.id } });
+    } catch {}
     return { ok: true };
   },
 
@@ -257,10 +272,10 @@ export const liveAdminActions = {
 
 export type LiveAdminAction = keyof typeof liveAdminActions;
 
-// LiveKit webhook: verifies the signature, then keeps room status in sync.
+// LiveKit webhook: verifies the signature, then keeps room status in sync
 export async function handleLiveKitWebhook(body: string, authorization: string): Promise<Response> {
-  const key = process.env["LIVEKIT_API_KEY"];
-  const secret = process.env["LIVEKIT_API_SECRET"];
+  const key = process.env["LIVEKIT_API_KEY"] || process.env["VITE_LIVEKIT_API_KEY"];
+  const secret = process.env["LIVEKIT_API_SECRET"] || process.env["VITE_LIVEKIT_API_SECRET"];
   if (!key || !secret) return new Response("Not configured", { status: 500 });
   const { WebhookReceiver } = await import("livekit-server-sdk");
   let event;

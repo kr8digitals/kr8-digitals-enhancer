@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useState } from "react";
 import { getMediaAsset } from "../utils/mediaStorage";
 
