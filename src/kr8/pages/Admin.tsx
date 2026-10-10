@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import * as rolesFns from "@/lib/roles.functions";
 import * as adminFns from "@/lib/admin.functions";
+import * as welcomeFns from "@/lib/welcome.functions";
 
 const STAFF_ROLES = ["founder", "co-founder", "admin", "moderator", "coach", "attendance_reviewer"] as const;
 
@@ -290,6 +291,9 @@ function OverviewTab({ setTab, currentUserId }: { setTab: (t: string) => void; c
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [welcomeRes, setWelcomeRes] = useState<any>(null);
+  const [welcomeLoading, setWelcomeLoading] = useState(false);
+  const bulkWelcomeFn = useServerFn(welcomeFns.bulkWelcomeToday);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -389,6 +393,37 @@ function OverviewTab({ setTab, currentUserId }: { setTab: (t: string) => void; c
           ))}
           {(!data.registrations_last_14d || data.registrations_last_14d.length === 0) && <p className="text-xs text-[#8a7ba8]">No data</p>}
         </div>
+      </Card>
+
+      <Card className="p-6 border-emerald-500/20">
+        <h4 className="font-bold text-white text-sm flex items-center gap-2">🎉 Welcome Bulk — 22 Today <span className="text-[10px] font-normal text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Resend + WhatsApp notification</span></h4>
+        <p className="text-xs text-[#8a7ba8] mt-1">Sends clickable WhatsApp learning group notification (link field) + Resend email with same link + KR8 ID to all profiles created last 24h (limit 100). Uses skill_settings.whatsapp_url per skill.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button disabled={welcomeLoading} onClick={async () => {
+            setWelcomeLoading(true);
+            setWelcomeRes(null);
+            try {
+              const res: any = await bulkWelcomeFn({});
+              setWelcomeRes(res);
+            } catch (e: any) {
+              setWelcomeRes({ ok: false, error: e.message || String(e) });
+            } finally { setWelcomeLoading(false); }
+          }} className="rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-5 py-2.5 text-xs font-bold text-white">
+            {welcomeLoading ? "Sending..." : `Send Welcome to 24h regs (${get(['new_today'])} today) →`}
+          </button>
+          {welcomeRes && (
+            <span className={`text-xs ${welcomeRes.ok ? 'text-emerald-300' : 'text-red-300'}`}>
+              {welcomeRes.ok ? `✓ Sent ${welcomeRes.count}/${welcomeRes.total} (failed ${welcomeRes.failed})` : `✕ ${welcomeRes.error || 'failed'}`}
+            </span>
+          )}
+        </div>
+        {welcomeRes?.details && (
+          <div className="mt-3 max-h-40 overflow-auto rounded-xl bg-black/30 p-3 text-[11px] text-[#b8aecf]">
+            {welcomeRes.details.map((d: any, i: number) => (
+              <div key={i} className="flex justify-between gap-2 py-0.5 border-b border-white/5 last:border-0"><span>{d.email} {d.skill}</span><span className={d.ok ? 'text-emerald-300' : 'text-red-300'}>{d.ok ? '✓' : '✕ ' + (d.error || '')} {d.whatsappUrl ? '🔗' : ''}</span></div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );
