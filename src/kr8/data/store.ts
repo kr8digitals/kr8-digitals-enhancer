@@ -38,9 +38,9 @@ export const DEFAULT_SKILLS: Skill[] = [
   { key: "video", name: "Video Editing & Animation", suffix: "VEVFD", whatsapp: "https://chat.whatsapp.com/GYVKMA6CLPC2mnG356u8jT", available: true, regOpen: true, snippet: "8-week video editing.", icon: "video", instructor: { name: "Daniel (Creative Expression)", photo: INSTRUCTOR_PHOTOS.daniel, bio: "Leads Video Editing." }, criteria: "Submit 6 edits + showreel.", curriculum: [] },
   { key: "web", name: "Website Development", suffix: "WDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week website development.", icon: "code", instructor: { name: "Timfire", photo: INSTRUCTOR_PHOTOS.timfire, bio: "Founder." }, criteria: "Submit 6 builds + deployed site.", curriculum: [] },
   { key: "frontend", name: "Front-End Development", suffix: "FEDVFD", whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v", available: true, regOpen: true, snippet: "8-week frontend.", icon: "code", instructor: { name: "Nonye Mercy", photo: "/team/chimnonyerem.jpg", bio: "Frontend Coach." }, criteria: "6+ builds including React.", curriculum: [] },
-  { key: "content_creation", name: "Content Creation", suffix: "CCVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: true, regOpen: true, snippet: "8-week creator programme.", icon: "video", instructor: null, criteria: "6 pieces + calendar.", curriculum: [] },
-  { key: "smm", name: "Social Media Management", suffix: "SMMVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: true, regOpen: true, snippet: "8-week SMM.", icon: "mobile", instructor: null, criteria: "30-day calendar + audit.", curriculum: [] },
-  { key: "marketing", name: "Digital Marketing", suffix: "DMVFD", whatsapp: "https://chat.whatsapp.com/Fah586y8c26KkUfRhAe8i6", available: true, regOpen: true, snippet: "8-week marketing.", icon: "chart", instructor: null, criteria: "6 assignments + campaign.", curriculum: [] },
+  { key: "content_creation", name: "Content Creation", suffix: "CCVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: false, regOpen: false, snippet: "8-week creator programme — launching next cohort.", icon: "video", instructor: null, criteria: "6 pieces + calendar.", curriculum: [] },
+  { key: "smm", name: "Social Media Management", suffix: "SMMVFD", whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz", available: false, regOpen: false, snippet: "8-week SMM — launching next cohort.", icon: "mobile", instructor: null, criteria: "30-day calendar + audit.", curriculum: [] },
+  { key: "marketing", name: "Digital Marketing", suffix: "DMVFD", whatsapp: "https://chat.whatsapp.com/Fah586y8c26KkUfRhAe8i6", available: false, regOpen: false, snippet: "8-week marketing — launching next cohort.", icon: "chart", instructor: null, criteria: "6 assignments + campaign.", curriculum: [] },
 ];
 
 export const FULL_CURRICULA: Record<string, Week[]> = {
@@ -281,7 +281,14 @@ export function savePaymentSettings(_v: PaymentSettings) {
   } catch {}
 }
 export const AGENCY_SERVICES = [{ icon: "palette", t: "Brand Design", d: "Complete identity." }];
-export const PORTFOLIO = [{ id: "p1", title: "AfriSTEM Global", service: "Website Development", client: "AfriSTEM Global", description: "Full responsive website.", link: "https://afristemglobal.org", price: "", showPrice: false, img: "/portfolio/afristem_hero.jpg", domain: "afristemglobal.org", placeholder: false }];
+export const PORTFOLIO = [
+  { id: "p1", title: "AfriSTEM Global", service: "Website Development", client: "AfriSTEM Global", description: "Full responsive STEM education platform with course management and live class integration.", link: "https://afristemglobal.org", price: "", showPrice: false, img: "/portfolio/afristem_hero.jpg", domain: "afristemglobal.org", placeholder: false },
+  { id: "p2", title: "KR8 Digitals Platform", service: "Website Development", client: "KR8 Digitals", description: "Unified academy, tribe and agency platform — 3,000+ members, live video, certificates.", link: "https://www.kr8digitals.com", price: "", showPrice: false, img: "/branding/kr8_logo.png", domain: "kr8digitals.com", placeholder: false },
+  { id: "p3", title: "Motionverse Brand System", service: "Brand Identity", client: "Motionverse", description: "Complete visual identity, logo system, and motion guidelines for media agency.", link: "https://www.kr8digitals.com/agency", price: "", showPrice: false, img: "/team/nicodemus.png", domain: "motionverse", placeholder: false },
+  { id: "p4", title: "Creative Expression Studio", service: "Video Production", client: "Creative Expression", description: "High-converting short-form video engine — 120+ assets, 3.2x engagement lift.", link: "https://www.kr8digitals.com/agency", price: "", showPrice: false, img: "/team/covenant.png", domain: "creative-expression", placeholder: false },
+  { id: "p5", title: "Mindset Shift Conference", service: "Event Branding", client: "KR8 Events", description: "Landing page, ticketing flow, and social campaign for 500+ attendee conference.", link: "https://www.kr8digitals.com/mindset-shift", price: "", showPrice: false, img: "/og-image.png", domain: "mindset-shift", placeholder: false },
+  { id: "p6", title: "Tribe Growth Engine", service: "Social Media Management", client: "KR8 Tribe", description: "Community growth strategy — 240% visibility increase, WhatsApp automation.", link: "https://www.kr8digitals.com/tribe", price: "", showPrice: false, img: "/team/chimnonyerem.jpg", domain: "kr8-tribe", placeholder: false },
+];
 export function getPortfolio() { return PORTFOLIO; }
 export function savePortfolio(_items: any) {}
 export const BLOG: any[] = [];
@@ -323,7 +330,7 @@ export const ATTENDANCE_TYPES = [
   { key: "mindset", name: "Mindset Shift", schedule: "Sun 9PM", open: true },
   { key: "hangout", name: "Creator Hangout", schedule: "Monthly", open: true },
 ];
-export const FULL_PORTFOLIO_LINK = "https://drive.google.com/drive/folders/1700q1hqAFOos7ZpPmpzFatUmIEwpa6J6";
+export const FULL_PORTFOLIO_LINK = "/agency";
 export const TRIBE_WHATSAPP = "https://chat.whatsapp.com/DgnBOEd5CfMHV8CTWgPNLH";
 export function getTribeWhatsApp() {
   try {
