@@ -3,15 +3,16 @@ import { useState, useEffect, type ChangeEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
 import {
-  getSkills, getSkill, getSkillName, areAllRegistrationsClosed, ATTENDANCE_TYPES, getTestimonials, getTribeWhatsApp, getSkillRegistration, getSkillWhatsApp,
+  getSkills, getSkill, getSkillName, areAllRegistrationsClosed, getTestimonials, getTribeWhatsApp, getSkillRegistration, getSkillWhatsApp,
   getStudentCertificates, getStudentCertificatesAsync,
   getStudentNotifications, getStudentNotificationsAsync, markNotificationRead, type CertificateRecord, type StudentNotification,
   getStudents, getReferralUrl,
   getFounders,
-  submitAttendance, getStudentAttendance, getStudentAttendanceAsync, getAttendanceTypesSettings, type AttendanceSubmission,
   getStudentConversations,
   type Account, type Skill,
 } from "../data/store";
+import AttendanceWidget from "../components/AttendanceWidget";
+import ProfileJourney from "../components/ProfileJourney";
 import { Pill, GradientButton, GhostButton, SectionHead, Card, Avatar, Check, ImageWithFallback } from "../components/ui";
 import { useSeo } from "../lib/useSeo";
 import Marquee from "../components/Marquee";
@@ -304,10 +305,11 @@ function Profile({ student }: { student: Account }) {
 
         <div className="grid gap-8 py-8 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
+            <ProfileJourney student={profile} />
             {tab === "posts" && (
               profile.type === "founder" || profile.type === "co-founder" ? (
-                <Card><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold text-white text-lg">Executive Attendance Management</h3><p className="mt-1 text-sm text-[#b8aecf]">Student attendance proofs submit for manual review.</p></div><Link to="/attendance-review" className="rounded-full bg-gradient-pink px-4 py-2 text-xs font-bold text-white">Open Attendance Review Queue →</Link></div></Card>
-              ) : (<AttendanceWidget student={profile} />)
+                <Card><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold text-white text-lg">Executive Attendance Management</h3><p className="mt-1 text-sm text-[#b8aecf]">Student attendance proofs submit for manual review with date/topic/time. Dashboard updates only after approval. Mindset/Hangout auto-marked via live.</p></div><Link to="/attendance-review" className="rounded-full bg-gradient-pink px-4 py-2 text-xs font-bold text-white">Open Attendance Review Queue →</Link></div></Card>
+              ) : (<div id="attendance"><AttendanceWidget student={profile} /></div>)
             )}
             {tab === "portfolio" && <PortfolioManager profile={profile} />}
             {tab === "activity" && (
@@ -389,107 +391,7 @@ function ConnectionsCard({ profile }: { profile: Account }) {
   );
 }
 
-function AttendanceWidget({ student }: { student: Account }) {
-  const { addNotification } = useAuth();
-  const [type, setType] = useState("");
-  const [topic, setTopic] = useState("");
-  const [speaker, setSpeaker] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [screenshotData, setScreenshotData] = useState("");
-  const [done, setDone] = useState(false);
-  const [submissions, setSubmissions] = useState<AttendanceSubmission[]>(() => {
-    try { return safeArray(getStudentAttendance(student.id), []); } catch { return []; }
-  });
-  const [openSettings, setOpenSettings] = useState<Record<string, boolean>>(() => {
-    try { return getAttendanceTypesSettings(); } catch { return { class: true, assignment: true, mindset: true, hangout: true }; }
-  });
-
-  const syncSubs = async () => {
-    try {
-      const asyncSubs = await getStudentAttendanceAsync(student.id);
-      setSubmissions(safeArray(asyncSubs, []));
-      setOpenSettings(getAttendanceTypesSettings());
-    } catch {
-      setSubmissions(safeArray(getStudentAttendance(student.id), []));
-    }
-  };
-
-  useEffect(() => {
-    syncSubs();
-    const handler = () => syncSubs();
-    window.addEventListener("kr8:attendance-updated", handler);
-    window.addEventListener("kr8:attendance-types-updated", handler);
-    return () => { window.removeEventListener("kr8:attendance-updated", handler); window.removeEventListener("kr8:attendance-types-updated", handler); };
-  }, [student.id]);
-
-  const at = safeArray(ATTENDANCE_TYPES, []).find((a) => a.key === type);
-  const isOpen = type ? (openSettings[type] !== undefined ? openSettings[type] : (at as any)?.open) : false;
-  const gradLocked = student.graduated && (type === "class" || type === "assignment");
-  const needsSpeaker = type === "mindset" || type === "hangout";
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => setScreenshotData(String(reader.result));
-    reader.readAsDataURL(file);
-  };
-
-  const submit = async () => {
-    if (!type || !topic.trim()) { addNotification("Please enter the topic covered."); return; }
-    const finalScreenshot = screenshotData || "https://images.pexels.com/photos/196644/pexels-photo-196644.jpeg?auto=compress&cs=tinysrgb&w=800";
-    const skillName = getSkillName(student.skill);
-    try {
-      await submitAttendance({ studentId: student.id, studentName: student.name, skill: skillName, type: type as any, topic: topic.trim(), speaker: speaker.trim() || undefined, screenshotUrl: finalScreenshot });
-      setDone(true); addNotification(`Attendance (${(at as any)?.name}) submitted — now in coach review queue.`); syncSubs();
-    } catch (e: any) { addNotification(e.message || "Submit failed"); }
-  };
-
-  const lastSub = safeArray(submissions, [])[0];
-
-  return (
-    <div className="space-y-6">
-      {lastSub && (
-        <div className={`rounded-2xl border p-4 text-xs ${lastSub.status === "accepted" ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-200" : lastSub.status === "rejected" ? "border-red-500/40 bg-red-950/20 text-red-200" : "border-amber-500/40 bg-amber-950/20 text-amber-200"}`}>
-          <div className="flex items-center justify-between"><span className="font-bold uppercase text-[11px]">Latest Submission Review Status:</span><span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${lastSub.status === "accepted" ? "bg-emerald-500/30 text-emerald-300" : lastSub.status === "rejected" ? "bg-red-500/30 text-red-300" : "bg-amber-500/30 text-amber-300"}`}>{lastSub.status === "accepted" ? "Approved ✓" : lastSub.status === "rejected" ? "Rejected ✕" : "Pending Review"}</span></div>
-          <p className="mt-2 text-sm text-white">Your last <strong>{lastSub.type}</strong> submission (<em>"{lastSub.topic}"</em>) {lastSub.status === "accepted" ? <span className="text-emerald-400 font-semibold">was approved.</span> : lastSub.status === "rejected" ? <span className="text-red-300 font-semibold">was rejected: "{lastSub.feedback || "Please re-submit clear proof."}"</span> : <span className="text-amber-300">is pending manual coach review.</span>}</p>
-        </div>
-      )}
-
-      {done ? (
-        <Card className="text-center"><div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-white"><Icon name="check" size={24} /></div><h3 className="text-lg font-bold text-white">Attendance Proof Submitted!</h3><p className="mt-2 text-sm text-[#b8aecf]">Your submission is queued for manual faculty review.</p><button onClick={() => { setDone(false); setType(""); setTopic(""); setSpeaker(""); setFileName(""); setScreenshotData(""); }} className="mt-4 text-sm font-bold text-pink-400 hover:underline">Submit Another Proof →</button></Card>
-      ) : (
-        <Card>
-          <h3 className="font-bold text-white text-lg">Mark Attendance</h3>
-          <p className="mt-1 text-sm text-[#b8aecf]">Private to you. Each type is reviewed manually — submit screenshot proof.</p>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {safeArray(ATTENDANCE_TYPES, []).map((a) => {
-              const typeOpen = openSettings[a.key] !== undefined ? openSettings[a.key] : a.open;
-              return <button key={a.key} onClick={() => setType(a.key)} className={`rounded-xl border px-3 py-3 text-left text-sm ${type === a.key ? "border-pink-400/60 bg-pink-500/10 text-white" : "border-white/10 text-[#b8aecf]"}`}><span className="font-semibold block">{a.name}</span><span className={`block text-[10px] font-bold mt-0.5 ${typeOpen ? "text-emerald-400" : "text-gray-400"}`}>{typeOpen ? "OPEN" : "CLOSED"}</span><span className="mt-1 block text-[10px] text-[#8a7ba8]">{a.schedule}</span></button>;
-            })}
-          </div>
-          {type && (
-            <div className="mt-4 space-y-3">
-              {gradLocked ? <p className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm text-red-300">Graduated students no longer have Class & Assignment access.</p> : !isOpen ? <p className="rounded-lg bg-yellow-500/10 px-4 py-2.5 text-sm text-yellow-200">This track is currently closed. Reference: {(at as any)?.schedule}.</p> : (
-                <>
-                  <div><label className="block text-xs font-semibold text-[#cabfe0] mb-1">Topic Covered *</label><input className={inputCls} placeholder="e.g. Figma Auto-Layout" value={topic} onChange={(e) => setTopic(e.target.value)} /></div>
-                  {needsSpeaker && <div><label className="block text-xs font-semibold text-[#cabfe0] mb-1">Speaker Name *</label><input className={inputCls} placeholder="e.g. Kenneth Timothy (Timfire)" value={speaker} onChange={(e) => setSpeaker(e.target.value)} /></div>}
-                  <div><label className="block text-xs font-semibold text-[#cabfe0] mb-1">Upload Screenshot Proof *</label><label className="block cursor-pointer rounded-xl border border-dashed border-white/20 bg-black/20 px-4 py-6 text-center text-sm text-[#8a7ba8] hover:border-pink-400/50"><span className="inline-flex items-center gap-2">{fileName ? <><Icon name="paperclip" size={15} /> <span className="text-pink-300 font-semibold">{fileName}</span></> : "Click to choose screenshot"}</span><input type="file" accept="image/*" className="hidden" onChange={handleFileChange} /></label></div>
-                  <GradientButton onClick={submit} className="w-full">Submit for Manual Review →</GradientButton>
-                </>
-              )}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {safeArray(submissions, []).length > 0 && (
-        <Card><h4 className="font-bold text-white text-base">Your Attendance Submissions History ({submissions.length})</h4><div className="mt-4 space-y-2">{safeArray(submissions, []).map((sub: any) => (<div key={sub.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-2xl border border-white/5 bg-black/30 p-3 text-xs"><div><div className="flex items-center gap-2"><span className="font-bold text-white capitalize">{sub.type}</span><span className="text-[#8a7ba8]">·</span><span className="text-[#cabfe0]">{sub.topic}</span><span className={`rounded-full px-2 py-0.2 text-[9px] font-bold uppercase ${sub.status === "accepted" ? "bg-emerald-500/20 text-emerald-300" : sub.status === "rejected" ? "bg-red-500/20 text-red-300" : "bg-amber-500/20 text-amber-300"}`}>{sub.status}</span></div>{sub.feedback && <p className="mt-1 text-[11px] text-[#8a7ba8]"><strong>Feedback: </strong> {sub.feedback}</p>}</div><span className="text-[10px] text-[#8a7ba8] shrink-0">{new Date(sub.submittedAt || sub.created_at).toLocaleDateString()}</span></div>))}</div></Card>
-      )}
-    </div>
-  );
-}
+/* AttendanceWidget moved to ../components/AttendanceWidget.tsx - world-class smart scheduling */
 
 function StudentCertificateSection({ profile, onDownload }: { profile: Account; onDownload: () => void; }) {
   const [certs, setCerts] = useState<CertificateRecord[]>(() => {

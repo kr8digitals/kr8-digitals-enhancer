@@ -36,6 +36,13 @@
       "when": 1790813741236,
       "tag": "0006_fix_admin_rls_graduation_performance",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790813741237,
+      "tag": "0007_worldclass_attendance_profiles",
+      "breakpoints": true
     }
   ]
 }

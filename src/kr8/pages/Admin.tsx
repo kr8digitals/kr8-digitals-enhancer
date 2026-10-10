@@ -1332,58 +1332,77 @@ function StudentRegistryTab({ currentUserId, isFounder }: { currentUserId: strin
   );
 }
 
-// ----------------- ATTENDANCE REVIEW -----------------
+// ----------------- ATTENDANCE REVIEW - WORLD CLASS -----------------
 function AttendanceReviewTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("pending");
+  const [typeFilter, setTypeFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rejectModal, setRejectModal] = useState<{ id: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [approveModal, setApproveModal] = useState<{ id: string } | null>(null);
+  const [approveComment, setApproveComment] = useState("");
+  const [approveWarning, setApproveWarning] = useState("");
+  const [settings, setSettings] = useState<any[]>([]);
+  const [editingSettings, setEditingSettings] = useState<Record<string, any>>({});
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      let q = supabase.from('attendance_submissions').select('id,user_id,kr8_id,type,proof_text,proof_image_url,status,points_awarded,created_at').order('created_at', { ascending: filter === 'pending' }).range((page - 1) * 25, page * 25 - 1);
+      let q = supabase.from('attendance_submissions').select('*').order('created_at', { ascending: filter === 'pending' ? true : false }).range((page - 1) * 25, page * 25 - 1);
       if (filter) q = q.eq('status', filter);
+      if (typeFilter) q = q.eq('type', typeFilter);
       const { data, error } = await q;
       if (error) throw error;
       setItems(data || []);
+      const { data: setData } = await supabase.from('attendance_settings').select('*');
+      if (setData) setSettings(setData);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, [page, filter]);
+  useEffect(() => { load(); }, [page, filter, typeFilter]);
 
-  const approve = async (id: string) => {
+  const approve = async (id: string, comment?: string, warning?: string) => {
+    setBusy(true);
     try {
-      const { data: sub } = await supabase.from('attendance_submissions').select('*').eq('id', id).maybeSingle();
-      if (!sub) throw new Error('Not found');
-      if (sub.status === 'approved') { setErr('Already approved'); return; }
-      const { error } = await supabase.from('attendance_submissions').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: currentUserId, points_awarded: sub.points_awarded ? sub.points_awarded : 10 }).eq('id', id);
+      const { data, error } = await supabase.rpc('approve_attendance', {
+        p_submission_id: id,
+        p_admin_id: currentUserId,
+        p_comment: comment || null,
+        p_warning: warning || null,
+      });
       if (error) throw error;
-      // Award points via points_ledger if not already
-      if (!sub.points_awarded) {
-        try {
-          await supabase.rpc('apply_points', { p_user_id: sub.user_id, p_kr8_id: sub.kr8_id, p_points_change: 10, p_reason: `Attendance ${sub.type} approved`, p_actor_id: currentUserId });
-        } catch {}
-      }
-      await logActivity(currentUserId, 'attendance_approve', id, { kr8_id: sub.kr8_id });
+      await logActivity(currentUserId, 'attendance_approve', id, { comment, warning, data });
       load();
-    } catch (e: any) { setErr(e.message); }
+      setApproveModal(null); setApproveComment(""); setApproveWarning("");
+      window.dispatchEvent(new Event('kr8:attendance-updated'));
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
-  const reject = async (id: string) => {
+  const reject = async (id: string, reason: string) => {
+    if (!reason || reason.trim().length < 5) { setErr('Rejection reason must be at least 5 characters (mandatory)'); return; }
+    setBusy(true);
     try {
-      const { error } = await supabase.from('attendance_submissions').update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: currentUserId }).eq('id', id);
+      const { data, error } = await supabase.rpc('reject_attendance', {
+        p_submission_id: id,
+        p_admin_id: currentUserId,
+        p_reason: reason.trim(),
+      });
       if (error) throw error;
-      await logActivity(currentUserId, 'attendance_reject', id, {});
+      await logActivity(currentUserId, 'attendance_reject', id, { reason });
       load();
-    } catch (e: any) { setErr(e.message); }
+      setRejectModal(null); setRejectReason("");
+      window.dispatchEvent(new Event('kr8:attendance-updated'));
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
   const bulkApprove = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Approve ${selectedIds.size} submissions?`)) return;
-    for (const id of selectedIds) { await approve(id); }
+    if (!confirm(`Approve ${selectedIds.size} submissions with auto-comment? Dashboard updates only after approval.`)) return;
+    for (const id of selectedIds) { await approve(id, "Bulk approved — great work!", ""); }
     setSelectedIds(new Set());
   };
 
@@ -1393,47 +1412,142 @@ function AttendanceReviewTab({ currentUserId }: { currentUserId: string }) {
     setSelectedIds(n);
   };
 
+  const updateSetting = async (type: string, patch: any) => {
+    try {
+      const { error } = await supabase.from('attendance_settings').update({ ...patch, updated_at: new Date().toISOString(), updated_by: currentUserId }).eq('type', type);
+      if (error) throw error;
+      load();
+    } catch (e: any) { setErr(e.message); }
+  };
+
+  const toggleOpen = async (type: string, current: boolean | null) => {
+    const newVal = current === null ? false : current === false ? true : null;
+    await updateSetting(type, { is_open: newVal });
+  };
+
   if (loading) return <LoadingState />;
   return (
-    <div className="space-y-4">
-      <Card className="p-6">
-        <h3 className="font-bold text-white">Attendance Review · Pending First</h3>
+    <div className="space-y-5">
+      <Card className="p-6 border border-pink-500/20">
+        <h3 className="font-display font-black text-white text-lg">Attendance Review · World-Class</h3>
+        <p className="text-[11px] text-[#8a7ba8] mt-1">Approve → dashboard/XP/streak/live feed update. Reject → mandatory reason (min 5 chars). Approve can include optional warning + comment. Date/topic/time shown. Auto-marked live flag visible.</p>
         {err && <ErrorState err={err} retry={load} />}
-        <div className="mt-3 flex gap-2 flex-wrap">
+        <div className="mt-4 flex gap-2 flex-wrap items-center">
           <select value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }} className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white">
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All</option>
+            <option value="pending">⏳ Pending Review</option>
+            <option value="approved">✅ Approved</option>
+            <option value="rejected">❌ Rejected</option>
+            <option value="">All Status</option>
           </select>
-          <button onClick={bulkApprove} disabled={selectedIds.size === 0} className="rounded-xl bg-emerald-500/20 px-4 py-2 text-xs font-bold text-emerald-300 disabled:opacity-30">Bulk Approve ({selectedIds.size})</button>
-          <button onClick={load} className="rounded-xl border border-white/10 px-4 py-2 text-xs text-white">Refresh</button>
+          <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1); }} className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white">
+            <option value="">All Types</option>
+            <option value="class">Class</option>
+            <option value="assignment">Assignment</option>
+            <option value="mindset">Mindset (auto)</option>
+            <option value="hangout">Hangout (auto)</option>
+          </select>
+          <button onClick={bulkApprove} disabled={selectedIds.size === 0 || busy} className="rounded-xl bg-emerald-500/20 px-4 py-2 text-xs font-bold text-emerald-300 disabled:opacity-30 border border-emerald-500/30">Bulk Approve {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}</button>
+          <button onClick={load} className="rounded-xl border border-white/10 px-4 py-2 text-xs text-white hover:bg-white/5">Refresh</button>
         </div>
 
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-3">
           {items.map((it: any) => (
-            <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-              <div className="flex justify-between gap-2">
-                <div className="flex gap-2 items-start min-w-0">
-                  <input type="checkbox" checked={selectedIds.has(it.id)} onChange={() => toggleSelect(it.id)} className="mt-1 accent-pink-500" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-white truncate">{it.kr8_id} · {it.type} {it.status === 'pending' && <span className="ml-1 px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 text-[9px]">PENDING</span>}</p>
-                    <p className="text-[11px] text-[#b8aecf] break-words">{it.proof_text || 'No text'}</p>
-                    {it.proof_image_url && <a href={it.proof_image_url} target="_blank" rel="noreferrer" className="text-[11px] text-pink-400 underline">View Proof Image</a>}
-                    <p className="text-[10px] text-[#6a5b82]">{new Date(it.created_at).toLocaleString()} · Points: {it.points_awarded || 0}</p>
+            <div key={it.id} className={`rounded-2xl border p-4 ${it.status === 'pending' ? 'border-amber-500/20 bg-amber-500/[0.04]' : it.status === 'approved' ? 'border-emerald-500/20 bg-emerald-500/[0.03]' : 'border-red-500/20 bg-red-500/[0.04]'}`}>
+              <div className="flex flex-col sm:flex-row justify-between gap-3">
+                <div className="flex gap-3 items-start min-w-0 flex-1">
+                  <input type="checkbox" checked={selectedIds.has(it.id)} onChange={() => toggleSelect(it.id)} className="mt-1 accent-pink-500 h-4 w-4" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-black text-white">{it.kr8_id || it.user_id?.slice(0,8)}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${it.type === 'class' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : it.type === 'assignment' ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : it.type === 'mindset' ? 'bg-pink-500/20 text-pink-300 border-pink-500/30' : 'bg-orange-500/20 text-orange-300 border-orange-500/30'}`}>{it.type}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${it.status === 'pending' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' : it.status === 'approved' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>{it.status}</span>
+                      {it.auto_marked && <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-[9px] font-bold text-purple-300">🤖 AUTO LIVE</span>}
+                      {it.live_purpose && <span className="text-[10px] text-[#8a7ba8]">Live: {it.live_purpose}</span>}
+                    </div>
+                    <div className="mt-2 grid gap-1 text-xs">
+                      <p><span className="text-[#8a7ba8]">Date:</span> <strong className="text-white">{it.attendance_date ? new Date(it.attendance_date).toLocaleDateString() : 'N/A'} {it.attendance_time ? `at ${it.attendance_time}` : ''}</strong> <span className="text-[#8a7ba8]">· Topic:</span> <strong className="text-white">"{it.attendance_topic || it.topic || it.proof_text?.slice(0,80) || 'No topic'}"</strong></p>
+                      {it.proof_text && it.proof_text !== it.attendance_topic && <p className="text-[#b8aecf] break-words leading-relaxed">{it.proof_text}</p>}
+                      {it.proof_image_url && <a href={it.proof_image_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-pink-400 underline font-bold">View Proof Image ↗</a>}
+                      {it.admin_comment && <p className="text-[11px]"><strong className={it.status === 'rejected' ? 'text-red-300' : 'text-emerald-300'}>{it.status === 'rejected' ? 'Rejection Reason:' : 'Admin Comment:'}</strong> <span className="text-[#b8aecf]">{it.admin_comment}</span></p>}
+                      {it.admin_warning && <p className="text-[11px]"><strong className="text-yellow-300">Warning:</strong> <span className="text-yellow-200/80">{it.admin_warning}</span></p>}
+                      {it.feedback && !it.admin_comment && <p className="text-[11px] text-[#8a7ba8]">Legacy feedback: {it.feedback}</p>}
+                      <p className="text-[10px] text-[#6a5b82]">Submitted {new Date(it.created_at).toLocaleString()} · {it.live_room_id ? `Room ${it.live_room_id}` : ''} · Points: {it.points_awarded || 0} {it.reviewed_at ? `· Reviewed ${new Date(it.reviewed_at).toLocaleString()}` : ''}</p>
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => approve(it.id)} className="px-2 py-1 rounded bg-emerald-500/20 text-[11px] text-emerald-300">Approve +10pts</button>
-                  <button onClick={() => reject(it.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300">Reject</button>
+                <div className="flex sm:flex-col gap-1.5 shrink-0 self-start">
+                  {it.status === 'pending' && (
+                    <>
+                      <button onClick={() => setApproveModal({ id: it.id })} disabled={busy} className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-xs font-bold text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-30">Approve ✓</button>
+                      <button onClick={() => { setRejectModal({ id: it.id }); setRejectReason(""); }} disabled={busy} className="px-4 py-2 rounded-xl bg-red-500/20 border border-red-500/30 text-xs font-bold text-red-300 hover:bg-red-500/30 disabled:opacity-30">Reject ✕</button>
+                    </>
+                  )}
+                  {it.status !== 'pending' && <span className="text-[11px] text-[#8a7ba8] px-2 py-1">{it.status === 'approved' ? 'Dashboard updated ✓' : 'Rejected'}</span>}
                 </div>
               </div>
             </div>
           ))}
-          {items.length === 0 && <EmptyState msg={`No ${filter} submissions`} />}
+          {items.length === 0 && <EmptyState msg={`No ${filter || 'all'} ${typeFilter || ''} submissions`} />}
         </div>
         <Pagination page={page} totalPages={10} onChange={setPage} />
       </Card>
+
+      {/* Admin override toggles */}
+      <Card className="p-6">
+        <h4 className="font-bold text-white">Attendance Schedule Overrides · Admin Control</h4>
+        <p className="text-[11px] text-[#8a7ba8] mt-1">Null = auto (smart calendar), true = force open, false = force closed. Class Mon/Wed/Fri 9PM-12AM WAT, Assignment Tue/Thu/Sat 12AM-11:59PM, Mindset 1st/3rd Sun 10PM-11PM, Hangout last Sun 10PM-11PM. Override message shown to students.</p>
+        <div className="mt-4 space-y-2">
+          {['class','assignment','mindset','hangout'].map(t => {
+            const cur = settings.find(s => s.type === t);
+            const isOpen = cur?.is_open;
+            const label = isOpen === null || isOpen === undefined ? 'AUTO (smart)' : isOpen ? 'FORCED OPEN' : 'FORCED CLOSED';
+            return (
+              <div key={t} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 flex flex-col sm:flex-row justify-between gap-3">
+                <div><p className="text-sm font-bold text-white capitalize">{t} · <span className={`px-2 py-0.5 rounded-full text-[10px] ${isOpen === null ? 'bg-blue-500/20 text-blue-300' : isOpen ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>{label}</span></p><p className="text-[11px] text-[#8a7ba8]">{cur?.message || 'No message'}</p><p className="text-[10px] text-[#6a5b82]">Last: {cur?.updated_at ? new Date(cur.updated_at).toLocaleString() : 'never'}</p></div>
+                <div className="flex flex-col gap-2 shrink-0">
+                  <button onClick={() => toggleOpen(t, isOpen)} className="px-3 py-1.5 rounded-lg bg-white/10 text-xs text-white">Cycle: AUTO→CLOSED→OPEN</button>
+                  <input placeholder="Override message" value={editingSettings[t] || ''} onChange={e => setEditingSettings(prev => ({ ...prev, [t]: e.target.value }))} className="rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-xs text-white w-48" />
+                  <button onClick={() => { if (editingSettings[t]) { updateSetting(t, { message: editingSettings[t] }); setEditingSettings(prev => ({ ...prev, [t]: '' })); } }} className="px-3 py-1 rounded bg-pink-500/20 text-[11px] text-pink-300">Save Message</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Reject modal - mandatory reason */}
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-3xl border border-red-500/30 bg-[#1a0010] p-6 shadow-2xl">
+            <h3 className="font-black text-white text-lg">Reject Attendance · Mandatory Reason</h3>
+            <p className="text-xs text-[#8a7ba8] mt-1">Reason required, min 5 characters. Student sees this.</p>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="e.g. Proof image unclear, topic mismatch, date invalid..." rows={4} className="mt-4 w-full rounded-xl border border-red-500/30 bg-black/40 px-3 py-2 text-sm text-white" autoFocus />
+            <p className="text-[10px] text-[#6a5b82] mt-1">{rejectReason.trim().length}/5 min</p>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => { setRejectModal(null); setRejectReason(""); }} className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white">Cancel</button>
+              <button onClick={() => reject(rejectModal.id, rejectReason)} disabled={rejectReason.trim().length < 5 || busy} className="flex-1 rounded-xl bg-red-500 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-40">Reject with Reason</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve modal - comment optional, warning optional */}
+      {approveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-3xl border border-emerald-500/30 bg-[#001a10] p-6 shadow-2xl">
+            <h3 className="font-black text-white text-lg">Approve Attendance ✓</h3>
+            <p className="text-xs text-[#8a7ba8] mt-1">Dashboard, XP, streak, live feed update only after this. Comment auto-added if empty. Warning optional.</p>
+            <div className="mt-4 space-y-3">
+              <div><label className="text-[11px] text-[#8a7ba8]">Admin Comment (optional, auto if blank)</label><textarea value={approveComment} onChange={e => setApproveComment(e.target.value)} placeholder="e.g. Great work! Keep streak going 🔥" rows={2} className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm text-white" /></div>
+              <div><label className="text-[11px] text-yellow-300/80">⚠️ Warning (optional) — student sees yellow badge</label><input value={approveWarning} onChange={e => setApproveWarning(e.target.value)} placeholder="e.g. Next time include time" className="mt-1 w-full rounded-xl border border-yellow-500/30 bg-black/40 px-3 py-2 text-sm text-white" /></div>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <button onClick={() => { setApproveModal(null); setApproveComment(""); setApproveWarning(""); }} className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white">Cancel</button>
+              <button onClick={() => approve(approveModal.id, approveComment, approveWarning)} disabled={busy} className="flex-1 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-black text-white disabled:opacity-40">Approve +10pts → Updates Dashboard</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

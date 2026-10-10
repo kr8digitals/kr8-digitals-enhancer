@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
-  ArrowRight, CalendarDays, Camera, Clock3, LockKeyhole, MessageCircle,
+  ArrowRight, Camera, LockKeyhole, MessageCircle,
   Mic2, Play, Radio, ShieldCheck, Sparkles, Users, Video,
 } from "lucide-react";
 import { useSeo } from "../lib/useSeo";
@@ -11,10 +11,12 @@ import ShareRoom from "../live/ShareRoom";
 import { supabase } from "@/integrations/supabase/client";
 import { createRoom, getRoomToken } from "@/lib/live.functions";
 import { useLiveIdentity, signedFileUrl, fmtDuration } from "../live/useLiveIdentity";
+import { getLagosNow, getAttendanceStatus, shouldAutoMarkLiveAttendance, type AttendanceType } from "../lib/attendance";
+import { useAuth } from "../context/AuthContext";
 
 const LiveRoom = lazy(() => import("../live/LiveRoom"));
 
-const activityCopy = {
+const activityCopy: any = {
   page_view: "explored KR8",
   sign_in: "signed in",
   sign_up: "joined KR8",
@@ -24,7 +26,7 @@ const activityCopy = {
   stream_join: "joined a broadcast",
 };
 
-function SectionLabel({ children, count }) {
+function SectionLabel({ children, count }: any) {
   return (
     <div className="mb-4 flex items-center justify-between gap-3">
       <h2 className="live-kicker">{children}</h2>
@@ -35,14 +37,13 @@ function SectionLabel({ children, count }) {
   );
 }
 
-function RecordingCard({ recording }) {
+function RecordingCard({ recording }: any) {
   const [url, setUrl] = useState("");
   const [open, setOpen] = useState(false);
   const play = async () => {
     setOpen(true);
     if (!url) setUrl(await signedFileUrl(recording.file_path));
   };
-
   return (
     <article className="live-recording group">
       <div className="live-recording-media">
@@ -64,23 +65,22 @@ function RecordingCard({ recording }) {
   );
 }
 
-function StartForm({ me, onStarted }) {
+function StartForm({ me, onStarted }: any) {
   const create = useServerFn(createRoom);
-  const [form, setForm] = useState({ title: "", description: "", mode: "meeting", visibility: "public", waitingRoom: false, roomType: "video" }); // Video or Audio choice
+  const [form, setForm] = useState({ title: "", description: "", mode: "meeting", visibility: "public", waitingRoom: false, roomType: "video" });
   const [busy, setBusy] = useState(false);
-  const submit = async (event) => {
+  const submit = async (event: any) => {
     event.preventDefault();
     setBusy(true);
     try {
-      const room = await create({ data: { ...form, userId: me.id, userName: me.name } });
+      const room: any = await create({ data: { ...form, userId: me.id, userName: me.name } });
       onStarted(room.id);
-    } catch (error) {
+    } catch (error: any) {
       alert(error.message);
     } finally {
       setBusy(false);
     }
   };
-
   return (
     <form onSubmit={submit} className="live-studio-panel">
       <div className="mb-5 flex items-start justify-between gap-4">
@@ -93,7 +93,7 @@ function StartForm({ me, onStarted }) {
       </div>
       <div className="space-y-3">
         <label className="live-field-label">Session title
-          <input required maxLength={140} placeholder="What are we gathering for?" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="live-field" />
+          <input required maxLength={140} placeholder="What are we gathering for? Mindset Shift / Hangout / Class" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="live-field" />
         </label>
         <label className="live-field-label">Short description
           <textarea maxLength={1000} rows={2} placeholder="Give people a reason to join." value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="live-field resize-none" />
@@ -103,7 +103,7 @@ function StartForm({ me, onStarted }) {
         {[
           ["meeting", "Meeting", "Everyone can speak", Users],
           ["broadcast", "Broadcast", "Hosts lead the room", Radio],
-        ].map(([value, label, description, ModeIcon]) => (
+        ].map(([value, label, description, ModeIcon]: any) => (
           <button type="button" key={value} onClick={() => setForm({ ...form, mode: value })} className={`live-mode ${form.mode === value ? "is-active" : ""}`}>
             <ModeIcon size={17} /><span><b>{label}</b><small>{description}</small></span>
           </button>
@@ -121,7 +121,7 @@ function StartForm({ me, onStarted }) {
 }
 
 function CommunityPulse() {
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState<any[]>([]);
   useEffect(() => {
     let alive = true;
     const load = () => supabase.from("activity_log").select("id,actor_name,action,target,created_at").order("created_at", { ascending: false }).limit(6)
@@ -130,10 +130,9 @@ function CommunityPulse() {
     const channel = supabase.channel("live-activity-pulse").on("postgres_changes", { event: "INSERT", schema: "public", table: "activity_log" }, load).subscribe();
     return () => { alive = false; supabase.removeChannel(channel); };
   }, []);
-
   return (
     <div className="live-activity-list">
-      {items.length === 0 ? <p className="live-empty-small">The community pulse will appear here.</p> : items.map((item, index) => (
+      {items.length === 0 ? <p className="live-empty-small">The community pulse will appear here.</p> : items.map((item: any, index: number) => (
         <div className="live-activity" key={item.id}>
           <span className="live-avatar">{(item.actor_name || "K").charAt(0).toUpperCase()}</span>
           <p className="min-w-0 flex-1 text-sm"><b>{item.actor_name || "A KR8 member"}</b> <span>{activityCopy[item.action] || item.action.replaceAll("_", " ")}</span><small>{new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></p>
@@ -144,7 +143,7 @@ function CommunityPulse() {
   );
 }
 
-function EntryGate({ gate, guestName, setGuestName, accessKey, setAccessKey, me, join, leave }) {
+function EntryGate({ gate, guestName, setGuestName, accessKey, setAccessKey, me, join, leave }: any) {
   if (!gate) return null;
   return (
     <div className="live-gate" role="dialog" aria-modal="true" aria-label="Join live room">
@@ -175,18 +174,44 @@ function EntryGate({ gate, guestName, setGuestName, accessKey, setAccessKey, me,
   );
 }
 
+function KR8IDPrompt({ onSubmit, onSkip, defaultName }: { onSubmit: (kr8: string, name: string) => void; onSkip: () => void; defaultName: string }) {
+  const [kr8, setKr8] = useState("");
+  const [name, setName] = useState(defaultName || "");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-3xl border border-pink-500/30 bg-[#1a0030] p-6 shadow-2xl">
+        <h3 className="font-display font-black text-white text-xl">🎯 Link Your KR8 Profile?</h3>
+        <p className="text-xs text-[#b8aecf] mt-2 leading-relaxed">You're joining live! If you have a KR8 ID, enter it to auto-record Mindset/Hangout attendance (1st, 3rd, last Sunday 10PM-11PM WAT). No account needed to join — but account needed to save attendance to profile & appear in live feed.</p>
+        <div className="mt-4 space-y-3">
+          <input value={kr8} onChange={e => setKr8(e.target.value.toUpperCase())} placeholder="KR8 ID e.g. KR8-GRA-12345" className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-sm text-white font-mono" />
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name (for live room)" className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-sm text-white" />
+        </div>
+        <div className="mt-5 flex gap-2">
+          <button onClick={onSkip} className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white">Skip — Join as Guest</button>
+          <button onClick={() => onSubmit(kr8.trim(), name.trim())} className="flex-1 rounded-xl bg-gradient-pink px-4 py-2.5 text-xs font-bold text-white">Save & Join Live →</button>
+        </div>
+        <p className="text-[10px] text-[#6a5b82] mt-3 text-center">Don't have account? <a href="/register" className="text-pink-400 underline">Create one</a> — optional, you can still join.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function LivePage() {
   useSeo({ path: "/live", noindex: true });
   const me = useLiveIdentity();
+  const { student } = useAuth() as any;
   const [params, setParams] = useSearchParams();
   const roomParam = params.get("room");
   const getToken = useServerFn(getRoomToken);
-  const [rooms, setRooms] = useState([]);
-  const [recordings, setRecordings] = useState([]);
-  const [session, setSession] = useState(null);
-  const [gate, setGate] = useState(null);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [recordings, setRecordings] = useState<any[]>([]);
+  const [session, setSession] = useState<any>(null);
+  const [gate, setGate] = useState<any>(null);
   const [accessKey, setAccessKey] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [kr8Prompt, setKr8Prompt] = useState<{ roomId: string; key?: string } | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<{ roomId: string; key?: string; kr8?: string; name?: string } | null>(null);
+  const [attendanceBanner, setAttendanceBanner] = useState<string | null>(null);
 
   useEffect(() => {
     const load = () => {
@@ -198,37 +223,116 @@ export default function LivePage() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const join = async (roomId, key) => {
-    if (!me.name) { setGate({ status: "name", roomId }); return; }
+  const autoMarkLive = async (roomId: string, roomTitle: string, purpose: string) => {
     try {
-      const result = await getToken({ data: { roomId, userId: me.id, userName: me.name, accessKey: key || undefined } });
-      if (result.status === "ok") { setGate(null); setSession(result); }
-      else setGate({ status: result.status, roomId });
-    } catch (error) { alert(error.message); }
+      const now = getLagosNow();
+      let type: AttendanceType | null = null;
+      const lower = `${roomTitle} ${purpose}`.toLowerCase();
+      if (lower.includes('mindset') || lower.includes('shift')) type = 'mindset';
+      else if (lower.includes('hangout')) type = 'hangout';
+      else {
+        const mindsetStatus = getAttendanceStatus('mindset', {}, now);
+        const hangoutStatus = getAttendanceStatus('hangout', {}, now);
+        if (mindsetStatus.isOpen) type = 'mindset';
+        else if (hangoutStatus.isOpen) type = 'hangout';
+      }
+      if (!type) return;
+      const should = shouldAutoMarkLiveAttendance(purpose, type, now);
+      if (!should) return;
+      const userId = student?.id || me.id;
+      const kr8Id = student?.kr8_id || (pendingJoin?.kr8) || null;
+      if (!student && !kr8Id && !pendingJoin?.kr8) {
+        setKr8Prompt({ roomId, key: purpose });
+        return;
+      }
+      const { data, error } = await supabase.rpc('auto_mark_live_attendance', {
+        p_user_id: userId,
+        p_kr8_id: kr8Id,
+        p_room_id: roomId,
+        p_purpose: purpose,
+        p_type: type,
+      });
+      if (error) throw error;
+      if ((data as any)?.already_marked) {
+        setAttendanceBanner(`✅ Already marked for ${type} today`);
+      } else if ((data as any)?.success) {
+        setAttendanceBanner(`🎉 Auto-marked ${type} attendance! +${(data as any).points_awarded || 15}pts · Streak updated · Live feed`);
+        window.dispatchEvent(new Event('kr8:attendance-updated'));
+      }
+      setTimeout(() => setAttendanceBanner(null), 6000);
+    } catch (e: any) {
+      console.warn('auto-mark failed', e.message);
+    }
+  };
+
+  const join = async (roomId: string, key?: string, kr8Override?: string, nameOverride?: string) => {
+    const effectiveName = nameOverride || me.name || guestName || student?.name;
+    if (!effectiveName) { setGate({ status: "name", roomId }); return; }
+    try {
+      const result: any = await getToken({ data: { roomId, userId: me.id || student?.id, userName: effectiveName, accessKey: key || undefined } } as any);
+      if (result.status === "ok") {
+        setGate(null);
+        setSession(result);
+        const room = rooms.find((r: any) => r.id === roomId);
+        setTimeout(() => autoMarkLive(roomId, room?.title || '', room?.purpose || room?.title || 'live'), 1500);
+      } else setGate({ status: result.status, roomId });
+    } catch (error: any) { alert(error.message); }
   };
 
   useEffect(() => { if (roomParam && me.id && !session) { const k = params.get("key") || ""; if (k) setAccessKey(k); join(roomParam, k); } }, [roomParam, me.id, me.name]);
   useEffect(() => {
     if (gate?.status !== "waiting") return;
-    const channel = supabase.channel(`wait-${gate.roomId}-${me.id}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "room_admissions", filter: `room_id=eq.${gate.roomId}` }, (payload) => {
+    const channel = supabase.channel(`wait-${gate.roomId}-${me.id}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "room_admissions", filter: `room_id=eq.${gate.roomId}` }, (payload: any) => {
       if (payload.new.user_id === me.id) join(gate.roomId, accessKey);
     }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [gate?.status, gate?.roomId]);
 
-  const enter = (roomId) => setParams({ room: roomId });
+  const enter = (roomId: string) => {
+    if (!student && !me.name) {
+      setKr8Prompt({ roomId });
+      setPendingJoin({ roomId });
+      return;
+    }
+    setParams({ room: roomId });
+    join(roomId);
+  };
   const leave = () => { setSession(null); setGate(null); setParams({}); };
-  if (session) return <Suspense fallback={<div className="live-hub flex min-h-screen items-center justify-center">Joining the room…</div>}><LiveRoom session={session} me={{ id: me.id, name: me.name }} onLeave={leave} /></Suspense>;
+  if (session) return <Suspense fallback={<div className="live-hub flex min-h-screen items-center justify-center">Joining the room…</div>}><LiveRoom session={session} me={{ id: me.id || student?.id, name: me.name || student?.name }} onLeave={leave} /></Suspense>;
 
   return (
     <div className="live-hub min-h-screen">
       <EntryGate gate={gate} guestName={guestName} setGuestName={setGuestName} accessKey={accessKey} setAccessKey={setAccessKey} me={me} join={join} leave={leave} />
+      {attendanceBanner && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 rounded-2xl bg-emerald-500 px-6 py-3 text-sm font-bold text-white shadow-2xl border border-emerald-400 animate-pulse">
+          {attendanceBanner}
+        </div>
+      )}
+      {kr8Prompt && (
+        <KR8IDPrompt
+          defaultName={me.name || student?.name || guestName || ""}
+          onSkip={() => {
+            setKr8Prompt(null);
+            const rId = pendingJoin?.roomId || kr8Prompt.roomId;
+            setParams({ room: rId });
+            join(rId, pendingJoin?.key || accessKey);
+          }}
+          onSubmit={(kr8Id, name) => {
+            setPendingJoin({ roomId: kr8Prompt.roomId, key: accessKey, kr8: kr8Id, name });
+            setKr8Prompt(null);
+            if (name) setGuestName(name);
+            if (name) me.setGuestName(name);
+            setParams({ room: kr8Prompt.roomId });
+            join(kr8Prompt.roomId, accessKey, kr8Id, name);
+          }}
+        />
+      )}
       <div className="mx-auto max-w-7xl px-4 py-7 sm:px-6 sm:py-10">
         <header className="live-page-head mb-8">
           <div>
-            <div className="mb-2 flex items-center gap-2"><span className="live-brand-mark">K</span><span className="live-kicker">KR8 Live</span></div>
+            <div className="mb-2 flex items-center gap-2"><span className="live-brand-mark">K</span><span className="live-kicker">KR8 Live · Auto Attendance</span></div>
             <h1 className="live-serif max-w-3xl text-4xl sm:text-6xl">Be in the room<br className="hidden sm:block" /> where ideas move.</h1>
-            <p className="live-meta mt-3 max-w-xl text-sm leading-relaxed sm:text-base">Meet face to face, follow the conversation, or take the stage. One clear space for every live KR8 moment.</p>
+            <p className="live-meta mt-3 max-w-xl text-sm leading-relaxed sm:text-base">Mindset Shift (1st & 3rd Sunday) & Hangout (last Sunday) 7PM-11PM WAT — attendance auto-marked 10PM-11PM when you join live. Everyone in stream linked to profiles; enter KR8 ID if not signed in. No account needed to join, account needed to save to profile & appear in live feed.</p>
           </div>
           <div className="live-head-stats">
             <span><b>{rooms.length}</b> on air</span><span><b>{recordings.length}</b> replays</span>
@@ -247,7 +351,7 @@ export default function LivePage() {
                 </div>
               ) : (
                 <div className="live-room-grid">
-                  {rooms.map((room, index) => (
+                  {rooms.map((room: any, index: number) => (
                     <article key={room.id} className={`live-room-card ${index === 0 ? "is-featured" : ""}`}>
                       <div className="live-room-visual">
                         <img src="/branding/kr8_logo.png" alt="" />
@@ -269,7 +373,7 @@ export default function LivePage() {
 
             <section>
               <SectionLabel>Recent replays</SectionLabel>
-              {recordings.length === 0 ? <div className="live-empty-line"><Play size={18} /><span><b>No replays yet.</b> Finished sessions will be saved here.</span></div> : <div className="live-recording-row">{recordings.map((recording) => <RecordingCard key={recording.id} recording={recording} />)}</div>}
+              {recordings.length === 0 ? <div className="live-empty-line"><Play size={18} /><span><b>No replays yet.</b> Finished sessions will be saved here.</span></div> : <div className="live-recording-row">{recordings.map((recording: any) => <RecordingCard key={recording.id} recording={recording} />)}</div>}
             </section>
           </main>
 
