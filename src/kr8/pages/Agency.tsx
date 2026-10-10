@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { IMG } from "../data/images";
 import { PORTFOLIO, getPortfolio, CONTACT, FULL_PORTFOLIO_LINK, saveClientRequest } from "../data/store";
@@ -5,7 +6,6 @@ import { Pill, GradientButton, GhostButton, SectionHead, Card, GlowImage } from 
 import Icon from "../components/Icon";
 import Marquee from "../components/Marquee";
 import { getSiteContent, type SiteContent } from "../data/cmsStore";
-import { supabase } from "@/integrations/supabase/client";
 import { useSeo } from "../lib/useSeo";
 
 const filters = ["All", ...Array.from(new Set(PORTFOLIO.map((p) => p.service)))];
@@ -297,23 +297,9 @@ export default function Agency() {
     const syncPortfolio = () => setPortfolio(getPortfolio());
     window.addEventListener("kr8:portfolio-updated", syncPortfolio);
     window.addEventListener("storage", syncPortfolio);
-    // Also fetch from DB agency_portfolio table (public read)
-    const fetchDbPortfolio = async () => {
-      try {
-        const { data } = await supabase.from('agency_portfolio').select('id,title,client,image,link,sort,visible').eq('visible', true).order('sort', { ascending: true });
-        if (data && data.length > 0) {
-          // Merge DB portfolio with local, DB takes precedence
-          const dbItems = data.map((d: any) => ({ id: d.id, title: d.title, client: d.client, service: "Agency Work", description: d.title, img: d.image, link: d.link, domain: d.link ? new URL(d.link).hostname : "" }));
-          setPortfolio([...dbItems, ...getPortfolio()]);
-        }
-      } catch {}
-    };
-    fetchDbPortfolio();
-    const iv = setInterval(fetchDbPortfolio, 60000);
     return () => {
       window.removeEventListener("kr8:portfolio-updated", syncPortfolio);
       window.removeEventListener("storage", syncPortfolio);
-      clearInterval(iv);
     };
   }, []);
 

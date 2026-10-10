@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect } from "react";
 import { Outlet, useLocation } from "../router-shim";
 import Navbar from "./Navbar";

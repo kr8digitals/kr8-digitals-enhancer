@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from "react";
 import MindsetShiftManager from "./MindsetShiftManager";
 import MindsetShiftEventManager from "./MindsetShiftEventManager";

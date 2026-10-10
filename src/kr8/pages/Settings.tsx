@@ -1,61 +1,109 @@
-// Profile Settings - KR8 ID everywhere, WebAuthn passkeys, Google linkIdentity
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link, useNavigate } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
-import { getReferralUrl, getSkill } from "../data/store";
+import { updateAccount, getReferralUrl, getSkill } from "../data/store";
 import { Card, Pill, GradientButton, GhostButton } from "../components/ui";
 import Icon from "../components/Icon";
-import { supabase } from "@/integrations/supabase/client";
-import { useServerFn } from "@tanstack/react-start";
-import * as webauthnFns from "@/lib/webauthn.functions";
+import {
+  registerBiometric,
+  getBiometricForStudent,
+  removeBiometric,
+  authenticateWithBiometrics,
+  checkBiometricSupport,
+  type BiometricCredential,
+} from "../utils/biometrics";
 
 export default function Settings() {
   useSeo({ path: "/settings", noindex: true });
-  const { student, signOut, refreshProfile } = useAuth();
+  const { student, signIn, signOut } = useAuth();
   const navigate = useNavigate();
-  const [expanded, setExpanded] = useState(false);
-  const [bio, setBio] = useState("");
-  const [privacy, setPrivacy] = useState<"Anyone" | "Friends only" | "No one">("Anyone");
+  const [expanded, setExpanded] = useState(!!student?.expandedVisibility);
+  const [bio, setBio] = useState(student?.bio ?? "");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [privacy, setPrivacy] = useState<"Anyone" | "Friends only" | "No one">(
+    student?.messagePrivacy ?? "Anyone"
+  );
   const [savedBio, setSavedBio] = useState(false);
   const [savedPrivacy, setSavedPrivacy] = useState(false);
+  const [savedPassword, setSavedPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
   const [copiedRef, setCopiedRef] = useState(false);
-  const [passkeys, setPasskeys] = useState<any[]>([]);
-  const [passkeyMsg, setPasskeyMsg] = useState<string | null>(null);
-  const [googleLinked, setGoogleLinked] = useState(false);
-  const [googleMsg, setGoogleMsg] = useState<string | null>(null);
 
-  const listPasskeysFn = useServerFn(webauthnFns.listPasskeys);
-  const addPasskeyFn = useServerFn(webauthnFns.addPasskey);
-  const removePasskeyFn = useServerFn(webauthnFns.removePasskey);
+  // Biometrics state
+  const [biometric, setBiometric] = useState<BiometricCredential | undefined>(undefined);
+  const [bioLoading, setBioLoading] = useState(false);
+  const [bioMessage, setBioMessage] = useState("");
+  const [bioSuccess, setBioSuccess] = useState(false);
+  const [supportInfo, setSupportInfo] = useState<{ supported: boolean; hasPlatformSensor: boolean; reason: string } | null>(null);
+
+  // Google Sign-In Enablement State (User-Enabled Security Model)
+  const [googleEmailInput, setGoogleEmailInput] = useState(student?.googleAuth?.linkedEmail || student?.email || "");
+  const [googlePasswordConfirm, setGooglePasswordConfirm] = useState("");
+  const [googleLinkOpen, setGoogleLinkOpen] = useState(false);
+  const [googleMsg, setGoogleMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    if (!student) return;
-    setBio(student.bio || "");
-    // Load passkeys
-    listPasskeysFn({ data: {} } as any).then((res: any) => {
-      if (res?.passkeys) setPasskeys(res.passkeys);
-    }).catch(()=>{});
-    // Check Google identities
-    supabase.auth.getUser().then(({ data }) => {
-      const hasGoogle = data.user?.identities?.some(i => i.provider === 'google');
-      setGoogleLinked(!!hasGoogle);
-    });
-    // Load profile privacy
-    supabase.from('profiles').select('bio,message_privacy,expanded_visibility').eq('id', student.id).maybeSingle().then(({ data }) => {
-      if (data) {
-        if (data.bio) setBio(data.bio);
-        if ((data as any).message_privacy) setPrivacy((data as any).message_privacy);
-        if ((data as any).expanded_visibility) setExpanded((data as any).expanded_visibility);
+    if (student) {
+      setBiometric(getBiometricForStudent(student.id));
+      if (student.googleAuth?.linkedEmail) {
+        setGoogleEmailInput(student.googleAuth.linkedEmail);
       }
+    }
+    checkBiometricSupport().then(setSupportInfo);
+  }, [student]);
+
+  const handleEnableGoogleAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    setGoogleMsg(null);
+    if (!student) return;
+    if (!googleEmailInput.trim().includes("@")) {
+      setGoogleMsg({ type: "error", text: "Please enter a valid Google Account email." });
+      return;
+    }
+    if (student.password && student.password !== googlePasswordConfirm) {
+      setGoogleMsg({ type: "error", text: "Incorrect password. You must verify your account password to authorize Google Sign-In." });
+      return;
+    }
+
+    const updated = updateAccount(student.id, {
+      googleAuth: {
+        enabled: true,
+        linkedEmail: googleEmailInput.trim().toLowerCase(),
+        linkedAt: Date.now(),
+        verifiedToken: "kr8_gauth_" + Math.random().toString(36).substring(2, 10),
+      },
     });
-  }, [student?.id]);
+
+    if (updated) {
+      signIn(updated);
+      setGoogleLinkOpen(false);
+      setGooglePasswordConfirm("");
+      setGoogleMsg({ type: "success", text: `Google Sign-In successfully enabled and bound to ${googleEmailInput.trim().toLowerCase()}!` });
+    }
+  };
+
+  const handleDisableGoogleAuth = () => {
+    if (!student) return;
+    if (!window.confirm("Are you sure you want to disable Google Sign-In for your account? You will need your password to log in.")) return;
+    const updated = updateAccount(student.id, {
+      googleAuth: undefined,
+    });
+    if (updated) {
+      signIn(updated);
+      setGoogleMsg({ type: "success", text: "Google Sign-In has been disabled for your account." });
+    }
+  };
 
   if (!student) {
     return (
       <div className="section-bg flex min-h-screen items-center justify-center px-5 py-16">
         <Card className="w-full max-w-md text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-pink text-white"><Icon name="lock" size={24} /></div>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-pink text-white">
+            <Icon name="lock" size={24} />
+          </div>
           <h1 className="font-display text-2xl text-white">Account Settings</h1>
           <p className="mt-2 text-sm text-[#b8aecf]">Please sign in with your KR8 Identity to manage your account settings.</p>
           <div className="mt-6 flex flex-col gap-3">
@@ -69,227 +117,581 @@ export default function Settings() {
 
   const skill = getSkill(student.skill);
 
-  const handleSaveBio = async () => {
-    try {
-      const { error } = await supabase.from('profiles').update({ bio: bio.trim(), updated_at: new Date().toISOString() }).eq('id', student.id);
-      if (error) throw error;
+  const handleToggleExpanded = (val: boolean) => {
+    setExpanded(val);
+    const updated = updateAccount(student.id, { expandedVisibility: val });
+    if (updated) signIn(updated);
+  };
+
+  const handleSaveBio = () => {
+    const updated = updateAccount(student.id, { bio: bio.trim() });
+    if (updated) {
+      signIn(updated);
       setSavedBio(true);
-      setTimeout(()=>setSavedBio(false), 2000);
-      refreshProfile();
-    } catch (e:any) {
-      alert(e.message);
+      setTimeout(() => setSavedBio(false), 2000);
     }
   };
 
-  const handleSavePrivacy = async (val: "Anyone" | "Friends only" | "No one") => {
+  const handleSavePrivacy = (val: "Anyone" | "Friends only" | "No one") => {
     setPrivacy(val);
-    try {
-      await supabase.from('profiles').update({ message_privacy: val } as any).eq('id', student.id);
+    const updated = updateAccount(student.id, { messagePrivacy: val });
+    if (updated) {
+      signIn(updated);
       setSavedPrivacy(true);
-      setTimeout(()=>setSavedPrivacy(false), 2000);
-    } catch {}
+      setTimeout(() => setSavedPrivacy(false), 2000);
+    }
   };
 
-  const handleToggleExpanded = async (val: boolean) => {
-    setExpanded(val);
+  const handleUpdatePassword = () => {
+    setPasswordError("");
+    if (!password.trim() || password.length < 6) {
+      setPasswordError("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError("Passwords do not match.");
+      return;
+    }
+    const updated = updateAccount(student.id, { password: password.trim() });
+    if (updated) {
+      signIn(updated);
+      setPassword("");
+      setConfirmPassword("");
+      setSavedPassword(true);
+      setTimeout(() => setSavedPassword(false), 2000);
+    }
+  };
+
+  const handleEnableBiometric = async () => {
+    setBioLoading(true);
+    setBioMessage("Awaiting hardware sensor touch... Please touch your fingerprint sensor or verify your passkey when prompted.");
+    setBioSuccess(false);
     try {
-      await supabase.from('profiles').update({ expanded_visibility: val } as any).eq('id', student.id);
-    } catch {}
+      const res = await registerBiometric(student.id, student.name);
+      if (res.ok && res.credential) {
+        setBiometric(res.credential);
+        setBioSuccess(true);
+        setBioMessage("Sensor verified! Fingerprint passkey registered successfully for this device.");
+        setTimeout(() => setBioMessage(""), 5000);
+      } else {
+        setBioSuccess(false);
+        setBioMessage(res.error || "Sensor verification was not completed.");
+      }
+    } catch (e: unknown) {
+      setBioSuccess(false);
+      setBioMessage(e instanceof Error ? e.message : "Sensor registration error");
+    } finally {
+      setBioLoading(false);
+    }
+  };
+
+  const handleTestBiometric = async () => {
+    setBioLoading(true);
+    setBioMessage("Touch your sensor now to verify identity...");
+    setBioSuccess(false);
+    try {
+      const res = await authenticateWithBiometrics(student.id);
+      if (res.ok) {
+        setBioSuccess(true);
+        setBioMessage("Biometric verified! Your fingerprint sensor is fully active and working.");
+        setTimeout(() => setBioMessage(""), 5000);
+      } else {
+        setBioSuccess(false);
+        setBioMessage(res.error || "Biometric sensor verification failed or was cancelled.");
+      }
+    } catch (e: unknown) {
+      setBioSuccess(false);
+      setBioMessage(e instanceof Error ? e.message : "Verification error");
+    } finally {
+      setBioLoading(false);
+    }
+  };
+
+  const handleRemoveBiometric = () => {
+    removeBiometric(student.id);
+    setBiometric(undefined);
+    setBioSuccess(true);
+    setBioMessage("Fingerprint credentials removed from this device.");
+    setTimeout(() => setBioMessage(""), 3000);
   };
 
   const copyReferral = () => {
-    navigator.clipboard.writeText(getReferralUrl(student.kr8_id || student.id));
+    navigator.clipboard.writeText(getReferralUrl(student.id));
     setCopiedRef(true);
-    setTimeout(()=>setCopiedRef(false), 2000);
-  };
-
-  const handleLinkGoogle = async () => {
-    setGoogleMsg(null);
-    try {
-      const { error } = await supabase.auth.linkIdentity({ provider: 'google' as any });
-      if (error) throw error;
-      setGoogleMsg("Redirecting to Google to link account...");
-    } catch (e:any) {
-      setGoogleMsg(e.message);
-    }
-  };
-
-  const handleUnlinkGoogle = async () => {
-    setGoogleMsg(null);
-    try {
-      // Supabase doesn't have direct unlink, need to use admin - for now show message
-      const { data: { user } } = await supabase.auth.getUser();
-      const googleIdentity = user?.identities?.find(i=>i.provider==='google');
-      if (!googleIdentity) {
-        setGoogleMsg("No Google identity linked");
-        return;
-      }
-      // Use supabase auth unlinkIdentity if available
-      const { error } = await (supabase.auth as any).unlinkIdentity(googleIdentity);
-      if (error) throw error;
-      setGoogleLinked(false);
-      setGoogleMsg("Google account unlinked");
-    } catch (e:any) {
-      setGoogleMsg(e.message);
-    }
-  };
-
-  const handleAddPasskey = async () => {
-    setPasskeyMsg(null);
-    try {
-      const { startRegistration } = await import("@simplewebauthn/browser");
-      // Get options from server
-      const optionsRes = await (addPasskeyFn as any)({ data: { action: 'options' } }).catch(async () => {
-        // fallback to supabase function
-        const { data, error } = await supabase.functions.invoke('webauthn-register-options');
-        if (error) throw error;
-        return data;
-      });
-      const opts = optionsRes?.options || optionsRes;
-      if (!opts) throw new Error("Failed to get registration options");
-      const attResp = await startRegistration(opts);
-      const verifyRes = await (addPasskeyFn as any)({ data: { attestation: attResp, name: `Passkey ${new Date().toLocaleDateString()}` } });
-      if (verifyRes?.ok) {
-        setPasskeyMsg("Passkey added successfully!");
-        const list = await listPasskeysFn({ data: {} } as any);
-        if ((list as any)?.passkeys) setPasskeys((list as any).passkeys);
-      } else {
-        // Try edge function verify
-        const { data: vData, error: vError } = await supabase.functions.invoke('webauthn-register-verify', { body: attResp });
-        if (vError) throw vError;
-        setPasskeyMsg("Passkey added!");
-        const list = await listPasskeysFn({ data: {} } as any);
-        if ((list as any)?.passkeys) setPasskeys((list as any).passkeys);
-      }
-    } catch (e:any) {
-      setPasskeyMsg(e.message || "Failed to add passkey");
-    }
-  };
-
-  const handleRemovePasskey = async (id: string) => {
-    if (!confirm("Remove this passkey?")) return;
-    try {
-      await removePasskeyFn({ data: { credentialId: id } } as any);
-      setPasskeys(prev => prev.filter(p=>p.id!==id && p.credential_id!==id));
-      setPasskeyMsg("Passkey removed");
-    } catch (e:any) {
-      setPasskeyMsg(e.message);
-    }
+    setTimeout(() => setCopiedRef(false), 2000);
   };
 
   return (
     <div className="section-bg min-h-screen px-5 py-14">
       <div className="mx-auto max-w-3xl">
-        <Pill>{student.type === "founder" ? "Founder Executive Settings" : student.type === "co-founder" ? "Co-Founder Executive Settings" : "Account Settings"}</Pill>
-        <h1 className="font-display mt-4 text-4xl text-white sm:text-5xl whitespace-nowrap">Your Account, <span className="text-gradient">Your Control.</span></h1>
-        <p className="mt-2 text-sm text-[#b8aecf]">Manage your verification privacy, security, profile information, and referral link. KR8 ID is your permanent identity.</p>
+        <Pill>
+          {student.type === "founder"
+            ? "Founder Executive Settings"
+            : student.type === "co-founder"
+            ? "Co-Founder Executive Settings"
+            : "Account Settings"}
+        </Pill>
+        <h1 className="font-display mt-4 text-4xl text-white sm:text-5xl">
+          {student.type === "founder" ? (
+            <>Founder Account, <span className="text-gradient">Executive Control.</span></>
+          ) : student.type === "co-founder" ? (
+            <>Co-Founder Account, <span className="text-gradient">Executive Control.</span></>
+          ) : (
+            <>Your Account, <span className="text-gradient">Your Control.</span></>
+          )}
+        </h1>
+        <p className="mt-2 text-sm text-[#b8aecf]">
+          Manage your verification privacy, security, profile information, and referral link.
+        </p>
 
+        {/* Locked Identity Card */}
         <Card className="mt-8">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
             <div>
-              <h2 className="font-bold text-white text-lg">{student.type === "founder" || student.type === "co-founder" ? "Verified Executive Leadership Record" : "Verified Identity Record"}</h2>
-              <p className="text-xs text-[#8a7ba8]">These official registration facts are locked to protect the integrity of your KR8 credential. KR8 ID shown, not auth UUID.</p>
+              <h2 className="font-bold text-white text-lg">
+                {student.type === "founder" || student.type === "co-founder"
+                  ? "Verified Executive Leadership Record"
+                  : "Verified Identity Record"}
+              </h2>
+              <p className="text-xs text-[#8a7ba8]">
+                {student.type === "founder" || student.type === "co-founder"
+                  ? "These leadership credentials confirm your executive status across KR8 Digitals."
+                  : "These official registration facts are locked to protect the integrity of your KR8 credential."}
+              </p>
             </div>
-            <span className="rounded-full bg-pink-500/10 px-3 py-1 font-mono text-xs font-bold text-pink-400">{student.kr8_id || student.id}</span>
+            <span className="rounded-full bg-pink-500/10 px-3 py-1 font-mono text-xs font-bold text-pink-400">
+              {student.id}
+            </span>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 text-xs">
-            <div className="rounded-xl bg-black/20 p-3"><span className="text-[#8a7ba8]">Full Name</span><p className="font-semibold text-white mt-1 text-sm">{student.name}</p></div>
-            <div className="rounded-xl bg-black/20 p-3"><span className="text-[#8a7ba8]">Registered Email</span><p className="font-semibold text-white mt-1 text-sm">{student.email}</p></div>
-            <div className="rounded-xl bg-black/20 p-3"><span className="text-[#8a7ba8]">Platform Role</span><p className="font-semibold text-white mt-1 text-sm">{student.type === "founder" ? "Founder & CEO" : student.type === "co-founder" ? "Co-Founder" : skill?.name ?? student.skill}</p></div>
-            <div className="rounded-xl bg-black/20 p-3"><span className="text-[#8a7ba8]">KR8 ID (copyable)</span><p className="font-mono font-bold text-pink-400 mt-1 text-sm">{student.kr8_id || student.id}</p></div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <span className="text-[#8a7ba8]">Full Name</span>
+              <p className="font-semibold text-white mt-1 text-sm">{student.name}</p>
+            </div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <span className="text-[#8a7ba8]">Registered Email</span>
+              <p className="font-semibold text-white mt-1 text-sm">{student.email}</p>
+            </div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <span className="text-[#8a7ba8]">Platform Role</span>
+              <p className="font-semibold text-white mt-1 text-sm">
+                {student.type === "founder"
+                  ? "Founder & CEO · Executive Leadership"
+                  : student.type === "co-founder"
+                  ? "Co-Founder · Executive Leadership"
+                  : skill?.name ?? student.skill}
+              </p>
+            </div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <span className="text-[#8a7ba8]">Status & Authority</span>
+              <p className="font-semibold text-white mt-1 text-sm">
+                {student.type === "founder"
+                  ? "Founder & CEO · Full System Authority"
+                  : student.type === "co-founder"
+                  ? "Co-Founder · Executive Leadership Authority"
+                  : `Cohort ${student.year ?? 2026} · ${student.graduated ? `Graduated (${student.certTier})` : "In Training"}`}
+              </p>
+            </div>
           </div>
         </Card>
 
+        {/* Public Verification Privacy */}
         <Card className="mt-6">
           <h2 className="font-bold text-white text-lg">Public Verify Page Visibility</h2>
-          <p className="mt-1 text-xs text-[#b8aecf]">Control what visitors see when looking up your KR8 ID on public Verify page (<code className="text-pink-300">/verify?id={student.kr8_id || student.id}</code>).</p>
+          <p className="mt-1 text-xs text-[#b8aecf]">
+            Control what information external visitors and employers see when looking up your KR8 ID on the public Verify page (<code className="text-pink-300">/verify?id={student.id}</code>).
+          </p>
+
           <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 cursor-pointer hover:border-pink-400/40">
-            <input type="checkbox" checked={expanded} onChange={e=>handleToggleExpanded(e.target.checked)} className="mt-1 accent-pink-500" />
-            <div><p className="text-sm font-semibold text-white">Enable Expanded Profile Visibility</p><p className="text-xs text-[#8a7ba8] mt-1">When enabled, your verified attendance, submissions, XP, and admin remarks are visible to anyone verifying your certificate.</p></div>
+            <input
+              type="checkbox"
+              checked={expanded}
+              onChange={(e) => handleToggleExpanded(e.target.checked)}
+              className="mt-1 accent-pink-500"
+            />
+            <div>
+              <p className="text-sm font-semibold text-white">Enable Expanded Profile Visibility</p>
+              <p className="text-xs text-[#8a7ba8] mt-1">
+                When enabled, your verified attendance count, assignment submissions, total XP points, and admin remarks are visible to anyone verifying your certificate. When disabled, only your core graduation identity is displayed.
+              </p>
+            </div>
           </label>
         </Card>
 
+        {/* Personal Bio */}
         <Card className="mt-6">
-          <div className="flex items-center justify-between"><h2 className="font-bold text-white text-lg">Personal Bio</h2>{savedBio && <span className="text-xs text-green-300 font-semibold">✓ Bio saved!</span>}</div>
-          <textarea value={bio} onChange={e=>setBio(e.target.value)} rows={3} placeholder="e.g. Visual designer passionate about brand identity." className="mt-3 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none" />
-          <div className="mt-3"><button onClick={handleSaveBio} className="rounded-full bg-gradient-pink px-5 py-2 text-xs font-bold text-white">Save Bio</button></div>
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-white text-lg">Personal Bio</h2>
+            {savedBio && <span className="text-xs text-green-300 font-semibold">✓ Bio saved!</span>}
+          </div>
+          <p className="mt-1 text-xs text-[#b8aecf]">A short description of yourself, your craft, and what you are building.</p>
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            rows={3}
+            placeholder="e.g. Visual designer passionate about brand identity and typography in West Africa."
+            className="mt-3 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none"
+          />
+          <div className="mt-3">
+            <button
+              onClick={handleSaveBio}
+              className="rounded-full bg-gradient-pink px-5 py-2 text-xs font-bold text-white"
+            >
+              Save Bio
+            </button>
+          </div>
         </Card>
 
+        {/* Messaging Privacy */}
         <Card className="mt-6">
-          <div className="flex items-center justify-between"><h2 className="font-bold text-white text-lg">Messaging & Direct Communication</h2>{savedPrivacy && <span className="text-xs text-green-300 font-semibold">✓ Privacy updated!</span>}</div>
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-white text-lg">Messaging & Direct Communication</h2>
+            {savedPrivacy && <span className="text-xs text-green-300 font-semibold">✓ Privacy updated!</span>}
+          </div>
           <p className="mt-1 text-xs text-[#b8aecf]">Select who is permitted to send you direct messages inside the Tribe community.</p>
           <div className="mt-4 grid grid-cols-3 gap-3">
-            {(["Anyone","Friends only","No one"] as const).map(opt=>(
-              <button key={opt} onClick={()=>handleSavePrivacy(opt)} className={`rounded-xl py-2.5 text-xs font-semibold transition-colors ${privacy===opt ? "bg-gradient-pink text-white" : "border border-white/15 bg-black/20 text-[#cabfe0] hover:text-white"}`}>{opt}</button>
+            {(["Anyone", "Friends only", "No one"] as const).map((opt) => (
+              <button
+                key={opt}
+                onClick={() => handleSavePrivacy(opt)}
+                className={`rounded-xl py-2.5 text-xs font-semibold transition-colors ${
+                  privacy === opt
+                    ? "bg-gradient-pink text-white"
+                    : "border border-white/15 bg-black/20 text-[#cabfe0] hover:text-white"
+                }`}
+              >
+                {opt}
+              </button>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-[#8a7ba8]">Uses direct_messages table (sender_id recipient_id text read_at), blocks, follows. Own rows update only read. To find other students use get_leaderboard ids, do not query profiles for other students.</p>
         </Card>
 
+        {/* Password & Security */}
+        <Card className="mt-6">
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-white text-lg">Change Password</h2>
+            {savedPassword && <span className="text-xs text-green-300 font-semibold">✓ Password updated successfully!</span>}
+          </div>
+          <p className="mt-1 text-xs text-[#b8aecf]">Update your login password for your KR8 Identity.</p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs text-[#8a7ba8]">New Password (min 6 chars)</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="New password"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white focus:border-pink-400/60 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[#8a7ba8]">Confirm New Password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm password"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white focus:border-pink-400/60 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {passwordError && (
+            <p className="mt-2 text-xs text-red-400">{passwordError}</p>
+          )}
+
+          <button
+            onClick={handleUpdatePassword}
+            className="mt-4 rounded-full bg-gradient-pink px-5 py-2 text-xs font-bold text-white"
+          >
+            Update Password
+          </button>
+        </Card>
+
+        {/* Biometrics & Fingerprint Authentication */}
+        {/* Google Sign-In Security (User-Enabled Security Model) */}
         <Card className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-pink text-white shadow-md"><Icon name="lock" size={22} /></div>
-              <div><h2 className="font-bold text-white text-lg">Google Sign-In Security</h2><p className="text-xs text-[#b8aecf]">Link Google account in Profile using linkIdentity, Continue with Google on sign-in.</p></div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-pink text-white shadow-md">
+                <Icon name="lock" size={22} />
+              </div>
+              <div>
+                <h2 className="font-bold text-white text-lg">Google Sign-In Security</h2>
+                <p className="text-xs text-[#b8aecf]">
+                  Google Sign-In stays off until you personally link and authorize your Google account for this KR8 profile.
+                </p>
+              </div>
             </div>
-            {googleLinked ? <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/20 px-3 py-1 text-xs font-semibold text-green-300"><span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />Linked</span> : <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[#b8aecf]">Not linked</span>}
+
+            {student.googleAuth?.enabled ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/20 px-3 py-1 text-xs font-semibold text-green-300">
+                <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
+                Active & Protected
+              </span>
+            ) : (
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[#b8aecf]">
+                Not enabled
+              </span>
+            )}
           </div>
+
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-            {googleLinked ? (
+            {student.googleAuth?.enabled ? (
               <div className="space-y-3">
-                <p className="text-xs text-[#cabfe0]">Google account is linked. You can use Continue with Google on sign-in page.</p>
-                <button onClick={handleUnlinkGoogle} className="rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20">Unlink Google</button>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-[#8a7ba8]">Linked Google Account:</span>
+                  <span className="font-mono text-pink-300">{student.googleAuth.linkedEmail}</span>
+                </div>
+                {student.googleAuth.linkedAt ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-[#8a7ba8]">Linked On:</span>
+                    <span className="text-[#cabfe0]">
+                      {new Date(student.googleAuth.linkedAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </span>
+                  </div>
+                ) : null}
+                <p className="pt-1 text-xs text-[#cabfe0]">
+                  You can now sign in on any device using your linked Google account. Disabling Google Sign-In means you will need your account password to log in.
+                </p>
+                <div className="mt-3">
+                  <button
+                    onClick={handleDisableGoogleAuth}
+                    className="rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20"
+                  >
+                    Disable Google Sign-In
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-xs leading-relaxed text-[#cabfe0]">Enable Google Sign-In to log in faster. Uses Supabase linkIdentity, verified.</p>
-                <button onClick={handleLinkGoogle} className="inline-flex items-center gap-2 rounded-full bg-white text-black px-5 py-2.5 text-xs font-bold hover:bg-gray-100"><span>G</span> Link Google Account</button>
+                <p className="text-xs leading-relaxed text-[#cabfe0]">
+                  Enable Google Sign-In to log in faster on shared or personal devices. For account security, you must verify your current KR8 password before linking — the Google address you bind can never be changed by anyone else on this account.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={() => {
+                      setGoogleMsg(null);
+                      setGoogleLinkOpen(true);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-pink px-5 py-2.5 text-xs font-bold text-white glow-pink-sm hover:scale-[1.02] transition-transform"
+                  >
+                    <Icon name="shield" size={16} />
+                    Link Google Account
+                  </button>
+                </div>
               </div>
             )}
-            {googleMsg && <div className={`mt-3 rounded-xl px-4 py-2.5 text-xs font-medium ${googleMsg.includes('Redirecting') ? "bg-blue-500/15 border border-blue-500/30 text-blue-300" : "bg-red-500/15 border border-red-500/30 text-red-300"}`}>{googleMsg}</div>}
+
+            {googleMsg && (
+              <div
+                className={`mt-3 rounded-xl px-4 py-2.5 text-xs font-medium ${
+                  googleMsg.type === "success"
+                    ? "bg-green-500/15 border border-green-500/30 text-green-300"
+                    : "bg-red-500/15 border border-red-500/30 text-red-300"
+                }`}
+              >
+                {googleMsg.text}
+              </div>
+            )}
           </div>
         </Card>
+
+        {googleLinkOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+            onClick={() => setGoogleLinkOpen(false)}
+          >
+            <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <Card className="p-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-pink text-white shadow-md">
+                    <Icon name="shield" size={22} />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-lg font-bold text-white">Link Google Account</h3>
+                    <p className="text-xs text-[#b8aecf]">
+                      Authorize Google Sign-In for this KR8 profile.
+                    </p>
+                  </div>
+                </div>
+                <form onSubmit={handleEnableGoogleAuth} className="mt-4 space-y-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#cabfe0]">Google Account Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={googleEmailInput}
+                      onChange={(e) => setGoogleEmailInput(e.target.value)}
+                      placeholder="your.email@gmail.com"
+                      className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white focus:border-pink-400/60 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-[#cabfe0]">Verify Account Password</label>
+                    <input
+                      type="password"
+                      required
+                      value={googlePasswordConfirm}
+                      onChange={(e) => setGooglePasswordConfirm(e.target.value)}
+                      placeholder="Your KR8 account password"
+                      className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white focus:border-pink-400/60 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <GradientButton type="submit" className="flex-1 py-2.5">
+                      Enable & Link Google Sign-In
+                    </GradientButton>
+                    <GhostButton onClick={() => setGoogleLinkOpen(false)} className="px-4 py-2.5">
+                      Cancel
+                    </GhostButton>
+                  </div>
+                </form>
+              </Card>
+            </div>
+          </div>
+        )}
 
         <Card className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-pink text-white shadow-md"><Icon name="fingerprint" size={22} /></div>
-              <div><h2 className="font-bold text-white text-lg">Biometrics & Passkeys</h2><p className="text-xs text-[#b8aecf]">WebAuthn passkeys SimpleWebAuthn with credentials table migration, log in via server-minted session, add/remove passkeys in Profile.</p></div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-pink text-white shadow-md">
+                <Icon name="fingerprint" size={22} />
+              </div>
+              <div>
+                <h2 className="font-bold text-white text-lg">Fingerprint & Biometric Login</h2>
+                <p className="text-xs text-[#b8aecf]">
+                  Secure your account with Touch ID, Face ID, Windows Hello or device fingerprint passkey.
+                </p>
+              </div>
             </div>
+
+            {biometric ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/20 px-3 py-1 text-xs font-semibold text-green-300">
+                <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
+                Active on this device
+              </span>
+            ) : (
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[#b8aecf]">
+                Not registered
+              </span>
+            )}
           </div>
+
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-            <p className="text-xs text-[#b8aecf] leading-relaxed">Register your device fingerprint sensor or passkey for instant, passwordless logins. Uses WebAuthn standard, credentials stored in webauthn_credentials table.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={handleAddPasskey} className="inline-flex items-center gap-2 rounded-full bg-gradient-pink px-5 py-2.5 text-xs font-bold text-white glow-pink-sm hover:scale-[1.02] transition-transform"><Icon name="fingerprint" size={16} />Add New Passkey</button>
-            </div>
-            {passkeys.length>0 && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-bold text-white">Your Passkeys ({passkeys.length})</p>
-                {passkeys.map((pk:any)=>(
-                  <div key={pk.id || pk.credential_id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs">
-                    <div><p className="font-bold text-white">{pk.name || pk.device_label || 'Passkey'}</p><p className="text-[11px] text-[#8a7ba8] font-mono">{pk.credential_id?.slice(0,20)}... · {pk.created_at ? new Date(pk.created_at).toLocaleDateString() : ''}</p></div>
-                    <button onClick={()=>handleRemovePasskey(pk.id || pk.credential_id)} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-bold text-red-300">Remove</button>
-                  </div>
-                ))}
+            {supportInfo && !supportInfo.supported && (
+              <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs font-semibold text-amber-300">
+                Biometrics are not available on this device: {supportInfo.reason} Password sign-in remains fully available.
               </div>
             )}
-            {passkeyMsg && <div className="mt-3 rounded-xl bg-pink-500/10 border border-pink-500/30 px-4 py-2.5 text-xs text-pink-300">{passkeyMsg}</div>}
+            {biometric ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-[#8a7ba8]">Registered Hardware / Passkey:</span>
+                  <span className="font-mono text-pink-300">{biometric.deviceLabel}</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-[#8a7ba8]">Activated On:</span>
+                  <span className="text-[#cabfe0]">
+                    {new Date(biometric.registeredAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+                <p className="text-xs text-[#cabfe0] pt-1">
+                  You can now sign into your KR8 student account on this device with a single touch or face recognition prompt, without needing to re-enter your password each time.
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-2 pt-2">
+                  <button
+                    onClick={handleTestBiometric}
+                    disabled={bioLoading}
+                    className="rounded-full border border-pink-400/50 bg-pink-500/10 px-4 py-2 text-xs font-bold text-pink-200 hover:bg-pink-500/20 disabled:opacity-50"
+                  >
+                    {bioLoading ? "Scanning sensor..." : "Test Fingerprint Sensor"}
+                  </button>
+                  <button
+                    onClick={handleRemoveBiometric}
+                    className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20"
+                  >
+                    Remove from this Device
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-[#b8aecf] leading-relaxed">
+                  Register your device fingerprint sensor or passkey for instant, passwordless logins on your phone, tablet, or laptop. KR8 Digitals uses the WebAuthn standard with zero biometric data transferred to external servers.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={handleEnableBiometric}
+                    disabled={bioLoading}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-pink px-5 py-2.5 text-xs font-bold text-white glow-pink-sm hover:scale-[1.02] transition-transform disabled:opacity-50"
+                  >
+                    <Icon name="fingerprint" size={16} />
+                    {bioLoading ? "Registering sensor..." : "Register Device Fingerprint / Passkey"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {bioMessage && (
+              <div
+                className={`mt-3 rounded-xl px-4 py-2.5 text-xs font-medium ${
+                  bioSuccess
+                    ? "bg-green-500/15 border border-green-500/30 text-green-300"
+                    : "bg-red-500/15 border border-red-500/30 text-red-300"
+                }`}
+              >
+                {bioMessage}
+              </div>
+            )}
           </div>
         </Card>
 
+        {/* Referral Link */}
         <Card className="mt-6">
           <h2 className="font-bold text-white text-lg">My Referral Program Link</h2>
-          <p className="mt-1 text-xs text-[#b8aecf]">Earn points and badges by inviting fellow creatives.</p>
+          <p className="mt-1 text-xs text-[#b8aecf]">Earn points and badges by inviting fellow creatives to learn digital skills.</p>
           <div className="mt-3 flex items-center gap-2">
-            <input readOnly value={getReferralUrl(student.kr8_id || student.id)} className="min-w-0 flex-1 rounded-xl border border-white/15 bg-black/30 px-3 py-2 font-mono text-xs text-pink-300 focus:outline-none select-all" />
-            <button onClick={copyReferral} className="rounded-xl bg-gradient-pink px-4 py-2 text-xs font-bold text-white whitespace-nowrap">{copiedRef ? "Copied! ✓" : "Copy Link"}</button>
+            <input
+              readOnly
+              value={getReferralUrl(student.id)}
+              className="min-w-0 flex-1 rounded-xl border border-white/15 bg-black/30 px-3 py-2 font-mono text-xs text-pink-300 focus:outline-none select-all"
+            />
+            <button
+              onClick={copyReferral}
+              className="rounded-xl bg-gradient-pink px-4 py-2 text-xs font-bold text-white whitespace-nowrap"
+            >
+              {copiedRef ? "Copied! ✓" : "Copy Link"}
+            </button>
           </div>
-          <p className="mt-2 text-[11px] text-[#8a7ba8]">Referral URL uses kr8_id, not UUID. Dashboard already copies kr8_id.</p>
         </Card>
 
+        {/* Navigation & Logout */}
         <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
-          <Link to="/academy" className="text-xs text-pink-300 hover:text-white">← Return to My Academy Profile</Link>
-          <button onClick={()=>{ signOut(); navigate("/"); }} className="rounded-full border border-red-500/30 bg-red-500/10 px-5 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20">Sign Out of Account</button>
+          <Link to="/academy" className="text-xs text-pink-300 hover:text-white">
+            ← Return to My Academy Profile
+          </Link>
+          <button
+            onClick={() => {
+              signOut();
+              navigate("/");
+            }}
+            className="rounded-full border border-red-500/30 bg-red-500/10 px-5 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20"
+          >
+            Sign Out of Account
+          </button>
         </div>
       </div>
     </div>

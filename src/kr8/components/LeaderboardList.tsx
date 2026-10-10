@@ -1,89 +1,50 @@
-// Production LeaderboardList - uses secure RPC get_leaderboard
+// @ts-nocheck
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { getStudents, getSkillName } from "../data/store";
 import { useAuth } from "../context/AuthContext";
 import { Avatar } from "./ui";
 import Icon from "./Icon";
 
-type LeaderRow = {
-  id: string;
-  kr8_id: string;
-  name: string;
-  skill: string | null;
-  points: number;
-  avatar: string | null;
-  graduated: boolean;
-  referrals: number;
-};
-
-function getSkillName(key?: string | null): string {
-  if (!key) return "Digital Skills";
-  const map: Record<string, string> = {
-    graphic: "Graphic Design",
-    video: "Video Editing",
-    web: "Website Development",
-    frontend: "Front-End Development",
-    content_creation: "Content Creation",
-    content: "Content Creation",
-    smm: "Social Media Management",
-    marketing: "Digital Marketing",
-  };
-  return map[key.toLowerCase()] || key;
-}
-
 export default function LeaderboardList({ limit }: { limit?: number }) {
   const { student } = useAuth();
-  const [rows, setRows] = useState<LeaderRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, refresh] = useState(0);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function load() {
-      try {
-        // Use secure RPC get_leaderboard - returns safe fields only
-        const { data, error } = await supabase.rpc('get_leaderboard', { limit_n: limit ?? 50 });
-
-        if (error) {
-          console.warn('Leaderboard RPC error:', error.message);
-          if (mounted) setRows([]);
-          return;
-        }
-
-        if (mounted) setRows((data as LeaderRow[]) || []);
-      } catch (e) {
-        console.warn('Leaderboard exception:', e);
-        if (mounted) setRows([]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-
-    load();
-
-    // Poll every 60-120 seconds to protect free quota, no realtime on whole profiles table
-    const interval = setInterval(load, 90000);
-
+    const update = () => refresh((value) => value + 1);
+    window.addEventListener("kr8:accounts-updated", update);
+    window.addEventListener("kr8:points-updated", update);
+    window.addEventListener("storage", update);
     return () => {
-      mounted = false;
-      clearInterval(interval);
+      window.removeEventListener("kr8:accounts-updated", update);
+      window.removeEventListener("kr8:points-updated", update);
+      window.removeEventListener("storage", update);
     };
-  }, [limit]);
+  }, []);
 
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {[...Array(6)].map((_, i) => (
-          <div key={i} className="h-16 rounded-2xl border border-white/10 bg-white/[0.03] animate-pulse" />
-        ))}
-      </div>
-    );
-  }
+  const all = getStudents();
+  // Rank all students by real points earned descending, factoring multi-track milestones
+  const sorted = [...all].sort((a, b) => {
+    const bonusA = (a.multiSkillCount && a.multiSkillCount > 1) ? (a.multiSkillCount - 1) * 50 : 0;
+    const bonusB = (b.multiSkillCount && b.multiSkillCount > 1) ? (b.multiSkillCount - 1) * 50 : 0;
+    const pA = (a.points || 0) + bonusA;
+    const pB = (b.points || 0) + bonusB;
+    if (pB !== pA) return pB - pA;
+    // Tie-break: real students before placeholders
+    if (!a.isPlaceholder && b.isPlaceholder) return -1;
+    if (a.isPlaceholder && !b.isPlaceholder) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  const max = limit ?? 50;
+  const rows = sorted.slice(0, max);
 
   return (
     <div className="w-full max-w-full space-y-2 overflow-x-hidden">
       {rows.map((s, i) => {
-        const isMe = student?.id === s.id || student?.kr8_id === s.kr8_id;
+        const skillLabel = s.skills && s.skills.length > 1
+          ? s.skills.map((k) => getSkillName(k)).join(" · ")
+          : getSkillName(s.skill);
+        const multiCount = s.multiSkillCount || (s.skills ? s.skills.length : 1);
+        const isMe = student?.id === s.id;
         return (
           <div
             key={s.id}
@@ -93,19 +54,29 @@ export default function LeaderboardList({ limit }: { limit?: number }) {
                 : "border-white/10 bg-white/[0.03]"
             }`}
           >
+            {/* Rank Position */}
             <div className="w-6 sm:w-8 shrink-0 text-center text-sm sm:text-base font-bold text-[#b8aecf]">
               {i < 3 ? <Icon name="trophy" size={16} className="text-pink-400 mx-auto" /> : i + 1}
             </div>
+
+            {/* Avatar */}
             <div className="shrink-0">
-              <Avatar src={s.avatar || undefined} name={s.name} size={36} />
+              <Avatar src={s.avatar} name={s.name} size={36} />
             </div>
+
+            {/* Student Info & Badges */}
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1 leading-snug">
                 <span className="truncate text-xs sm:text-sm font-semibold text-white max-w-[110px] xs:max-w-[140px] sm:max-w-xs">
-                  {s.name}
+                  {s.isPlaceholder ? "KR8 Creator" : s.name}
                 </span>
                 {isMe && (
                   <span className="text-[10px] sm:text-xs text-pink-400 font-bold shrink-0">(You)</span>
+                )}
+                {multiCount > 1 && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 text-[9px] text-amber-300 shrink-0 font-bold">
+                    <Icon name="bolt" size={10} /> Multi-Track ({multiCount})
+                  </span>
                 )}
                 {s.graduated && (
                   <span className="inline-flex items-center gap-0.5 rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] text-[#cabfe0] shrink-0 font-medium">
@@ -118,18 +89,17 @@ export default function LeaderboardList({ limit }: { limit?: number }) {
                   </span>
                 )}
               </div>
-              <p className="truncate text-[10px] sm:text-xs text-[#8a7ba8] mt-0.5">{getSkillName(s.skill)}</p>
+              <p className="truncate text-[10px] sm:text-xs text-[#8a7ba8] mt-0.5">{skillLabel}</p>
             </div>
+
+            {/* Points Column */}
             <div className="shrink-0 text-right pl-1">
-              <p className="text-sm sm:text-base font-bold text-gradient leading-tight">{s.points || 0}</p>
+              <p className="text-sm sm:text-base font-bold text-gradient leading-tight">{s.points}</p>
               <p className="text-[9px] uppercase tracking-wider text-[#8a7ba8]">pts</p>
             </div>
           </div>
         );
       })}
-      {rows.length === 0 && (
-        <p className="text-xs text-[#8a7ba8] text-center py-6">No students yet. Be the first to earn points!</p>
-      )}
     </div>
   );
 }

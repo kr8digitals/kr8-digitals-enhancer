@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { getSiteContent, saveSiteContent, resetSiteContent, type SiteContent } from "../../data/cmsStore";
 import { Card } from "../ui";

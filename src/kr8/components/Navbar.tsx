@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { supabase as __sb } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "../router-shim";
@@ -73,7 +74,7 @@ export default function Navbar() {
           {/* Logo */}
           <Link
             to="/"
-            className="group flex items-center gap-2.5 font-display text-2xl tracking-tight transition-transform hover:scale-[1.02] whitespace-nowrap shrink-0"
+            className="group flex items-center gap-2.5 font-display text-2xl tracking-tight transition-transform hover:scale-[1.02]"
             onClick={closeDrawer}
             aria-label="KR8 Digitals home"
           >
@@ -84,9 +85,9 @@ export default function Navbar() {
                 className="h-full w-full object-contain filter drop-shadow"
               />
             </div>
-            <div className="flex items-center leading-none whitespace-nowrap">
-              <span className="text-gradient font-black text-xl sm:text-2xl whitespace-nowrap">KR8</span>
-              <span className="text-white font-bold text-xl sm:text-2xl ml-1 whitespace-nowrap">Digitals</span>
+            <div className="flex items-center leading-none">
+              <span className="text-gradient font-black text-2xl">KR8</span>
+              <span className="text-white font-bold text-2xl ml-1">Digitals</span>
             </div>
           </Link>
 

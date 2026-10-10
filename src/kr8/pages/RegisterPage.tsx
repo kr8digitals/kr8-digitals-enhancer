@@ -1,4 +1,4 @@
-// Production Register Page - Supabase Auth, server-generated KR8 ID, DB-first skills
+// Production Register Page - Supabase Auth, server-generated KR8 ID, DB-first skills, WhatsApp link + Resend welcome
 import { useState, useEffect } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link, Navigate, useNavigate, useSearchParams } from "../router-shim";
@@ -7,6 +7,8 @@ import { getSkills, areAllRegistrationsClosed, getSkillRegistration, buildPhone,
 import { Card, GradientButton, Pill } from "../components/ui";
 import CountryPhone from "../components/CountryPhone";
 import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import * as welcomeFns from "@/lib/welcome.functions";
 
 type DbSkill = { skill_key: string; name: string; reg_open: boolean; available: boolean; sort_order: number };
 
@@ -30,6 +32,8 @@ export default function RegisterPage() {
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [dbSkills, setDbSkills] = useState<DbSkill[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
+  const sendWelcomeFn = useServerFn(welcomeFns.sendWelcomeWithWhatsapp);
+  const [welcomeLink, setWelcomeLink] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,10 +108,45 @@ export default function RegisterPage() {
       if (dob) signUpData.dob = dob;
       const result = await signUp(signUpData);
       if (result.ok) {
-        setStatusMsg({ type: "success", text: `Check your email to confirm - your account is created! KR8 ID: ${(result as any).kr8_id || 'generated'}. Confirmation email sent - check spam too. After confirming, sign in on any device.` });
-        setTimeout(() => navigate("/signin?registered=true"), 2500);
+        const kr8id = (result as any).kr8_id || 'generated';
+        const uid = (result as any).user?.id;
+        let waLink: string | null = null;
+        // Try to send welcome notification with WhatsApp link + email via Resend (server)
+        if (uid) {
+          try {
+            const welcomeRes: any = await sendWelcomeFn({ data: { userId: uid, skillKey: studentForm.skill } });
+            if (welcomeRes?.whatsappUrl) {
+              waLink = welcomeRes.whatsappUrl;
+              setWelcomeLink(waLink);
+            }
+          } catch (e) {
+            console.warn('welcome send failed (may need confirm first)', e);
+            // Fallback fetch whatsapp_url client side for immediate display
+            try {
+              const { data: skillRow } = await supabase.from('skill_settings').select('whatsapp_url,name').eq('skill_key', studentForm.skill).maybeSingle();
+              if (skillRow?.whatsapp_url) {
+                waLink = skillRow.whatsapp_url;
+                setWelcomeLink(waLink);
+                // Also try client notification insert
+                try {
+                  await supabase.from('notifications').insert({
+                    user_id: uid,
+                    title: `Welcome to KR8 ${skillRow.name || studentForm.skill}! Join WhatsApp`,
+                    message: `Your KR8 ID ${kr8id} — Join your ${skillRow.name || studentForm.skill} group: ${skillRow.whatsapp_url}`,
+                    type: 'welcome',
+                    read: false,
+                    link: skillRow.whatsapp_url,
+                  });
+                } catch {}
+              }
+            } catch {}
+          }
+        }
+        setStatusMsg({ type: "success", text: `Check your email to confirm - your account is created! KR8 ID: ${kr8id}. Confirmation email sent - check spam too. After confirming, sign in on any device.${waLink ? ` WhatsApp group: ${waLink}` : ''}` });
+        // Don't auto navigate if we have link to show
+        if (!waLink) setTimeout(() => navigate("/signin?registered=true"), 2500);
       } else {
-        const errText = result.error || "Registration failed";
+        const errText = (result as any).error || "Registration failed";
         // If sign-up fails Database error saving new user show Registration for this skill is closed
         if (errText.toLowerCase().includes('database error saving new user') || errText.toLowerCase().includes('database error')) {
           setStatusMsg({ type: "error", text: "Registration for this skill is closed" });
@@ -180,6 +219,15 @@ export default function RegisterPage() {
           <div className="mb-6 rounded-2xl border border-pink-500/40 bg-pink-500/10 p-4 text-center">
             <p className="text-xs sm:text-sm text-pink-200">You are signed in as <span className="font-bold text-white">{user.name}</span> ({user.kr8_id}).</p>
             <Link to="/dashboard" className="mt-2 inline-block text-xs font-bold text-pink-400 underline">Go to Dashboard →</Link>
+          </div>
+        )}
+
+        {welcomeLink && (
+          <div className="mb-6 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-5 text-center">
+            <p className="text-sm font-bold text-white">🎉 Join Your Learning Group Now!</p>
+            <p className="text-xs text-emerald-200 mt-1">Your cohort WhatsApp group is ready — click below</p>
+            <a href={welcomeLink} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 px-6 py-3 text-sm font-black text-white shadow-lg hover:scale-105 transition">Join WhatsApp Group →</a>
+            <p className="text-[11px] text-[#8a7ba8] mt-2">Also sent as notification + email via Resend. Dashboard will show link after sign-in.</p>
           </div>
         )}
 

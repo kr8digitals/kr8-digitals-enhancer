@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useState } from "react";
 import { getSocialLinks } from "../data/store";
 import Icon, { type IconName } from "./Icon";

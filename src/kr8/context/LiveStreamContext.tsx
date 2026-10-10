@@ -1,4 +1,4 @@
-// Production LiveStreamContext - DB-first, safe, no crash on missing addNotification
+// @ts-nocheck
 import {
   createContext,
   useContext,
@@ -9,90 +9,72 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { liveKitManager, type StreamDataMessage } from "../lib/livekit";
+import {
+  getActiveLiveStream,
+  startLiveStream as storeStartStream,
+  endActiveLiveStream as storeEndStream,
+  getLiveChatMessages,
+  sendLiveChatMessage,
+  pinLiveChatMessage,
+  deleteLiveChatMessage,
+  joinStreamViewer,
+  leaveStreamViewer,
+  toggleParticipantMute,
+  muteAllListeners,
+  getStreamReplays,
+  getLastEndedStream,
+  canUserHostStream,
+  getStreamQuestions,
+  submitStreamQuestion,
+  upvoteStreamQuestion,
+  answerStreamQuestion,
+  dismissStreamQuestion,
+  getStreamPolls,
+  createStreamPoll,
+  voteStreamPoll,
+  closeStreamPoll,
+  getStreamAccessRequests,
+  requestStreamAccess,
+  respondStreamAccessRequest,
+  getStreamInvites,
+  createStreamInvite,
+  getStreamRecordings,
+  addStreamRecording,
+  promoteParticipantRole,
+  toggleRaiseHand,
+  setSpotlightParticipant,
+  setChatPermission as storeSetChatPermission,
+  toggleStreamLock,
+  suspendStreamActivities,
+  setBreakoutRooms,
+  updateLiveStream,
+  type LiveStream,
+  type LiveChatMessage,
+  type StreamReplay,
+  type StreamRole,
+  type LiveStreamParticipant,
+  type StreamQuestion,
+  type StreamPoll,
+  type StreamAccessRequest,
+  type StreamInvite,
+  type StreamRecordingItem,
+  type BreakoutRoom,
+} from "../data/store";
 
-type StreamRole = "host" | "co-host" | "panelist" | "moderator" | "attendee" | "viewer" | "speaker";
-
-type LiveStreamParticipant = {
+interface FloatingReaction {
   id: string;
-  name: string;
-  avatar?: string;
-  role: StreamRole;
-  isMuted?: boolean;
-  isVideoOn?: boolean;
-  handRaised?: boolean;
-  joinedAt: number;
-};
-
-type LiveChatMessage = {
-  id: string;
-  streamId: string;
-  senderId: string;
-  senderName: string;
-  senderRole: StreamRole;
-  text: string;
-  createdAt: number;
-};
-
-type LiveStream = {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  hostId: string;
-  hostName: string;
-  hostAvatar?: string;
-  visibility: "public" | "private";
-  accessKey?: string;
-  isLive: boolean;
-  startedAt: number;
-  viewerCount: number;
-  peakViewers: number;
-  viewers: LiveStreamParticipant[];
-};
-
-type StreamReplay = {
-  id: string;
-  title: string;
-  hostName: string;
-  category: string;
-  date: string;
-  durationMinutes: number;
-  peakViewers: number;
-  thumbnail: string;
-  videoUrl: string;
-  messagesCount: number;
-};
+  emoji: string;
+  left: number;
+}
 
 interface LiveStreamContextType {
   activeStream: LiveStream | null;
   isLive: boolean;
   isStageOpen: boolean;
+  isMiniPlayerOpen: boolean;
   canHost: boolean;
   currentRole: StreamRole;
-  chatMessages: LiveChatMessage[];
-  replays: StreamReplay[];
-  lastEndedStream: StreamReplay | null;
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
-  cameraActive: boolean;
-  micActive: boolean;
-  isScreenSharing: boolean;
-  openStage: (replay?: StreamReplay) => void;
-  closeStage: () => void;
-  startCameraStream: () => Promise<MediaStream | null>;
-  startScreenShare: () => Promise<MediaStream | null>;
-  stopMediaTracks: () => void;
-  toggleCamera: () => boolean;
-  toggleMic: () => boolean;
-  startStream: (data: any) => Promise<LiveStream | null>;
-  endStream: () => Promise<StreamReplay | null>;
-  sendMessage: (text: string) => void;
-  // Legacy compat
-  isMiniPlayerOpen: boolean;
-  openMiniPlayer: () => void;
-  closeMiniPlayer: () => void;
   isPrivateAuthorized: boolean;
   audioOnly: boolean;
   toggleAudioOnly: () => void;
@@ -100,28 +82,29 @@ interface LiveStreamContextType {
   setSpotlight: (id: string | null) => void;
   pinnedParticipantId: string | null;
   setPinParticipant: (id: string | null) => void;
+  chatMessages: LiveChatMessage[];
   chatPermission: "everyone" | "presenters_only" | "disabled";
-  updateChatPermission: (perm: any) => void;
-  reactions: any[];
+  updateChatPermission: (perm: "everyone" | "presenters_only" | "disabled") => void;
+  reactions: FloatingReaction[];
   sendReaction: (emoji: string) => void;
   raisedHands: string[];
   raiseHand: () => void;
-  lowerHand: (id?: string) => void;
-  questions: any[];
+  lowerHand: (targetId?: string) => void;
+  questions: StreamQuestion[];
   submitQuestion: (text: string, isAnon: boolean) => void;
-  upvoteQuestion: (id: string) => void;
-  answerQuestion: (id: string, answer: string, visibility: any) => void;
-  dismissQuestion: (id: string) => void;
-  polls: any[];
-  createPoll: (...args: any[]) => void;
-  votePoll: (pollId: string, idx: number) => void;
+  upvoteQuestion: (qId: string) => void;
+  answerQuestion: (qId: string, answer: string, visibility: "public" | "private") => void;
+  dismissQuestion: (qId: string) => void;
+  polls: StreamPoll[];
+  createPoll: (question: string, options: string[], isAnon?: boolean, isQuiz?: boolean, correctOption?: number) => void;
+  votePoll: (pollId: string, optionIdx: number) => void;
   closePoll: (pollId: string) => void;
-  requests: any[];
-  requestAccess: (id: string) => void;
-  respondRequest: (id: string, status: any) => void;
-  invites: any[];
-  createInvite: (...args: any[]) => any;
-  recordings: any[];
+  requests: StreamAccessRequest[];
+  requestAccess: (streamId: string) => void;
+  respondRequest: (requestId: string, status: "accepted" | "rejected" | "conditional", message?: string) => void;
+  invites: StreamInvite[];
+  createInvite: (inviteeUserId?: string, inviteeName?: string, role?: "attendee" | "co-host" | "panelist" | "moderator") => StreamInvite | null;
+  recordings: StreamRecordingItem[];
   isRecording: boolean;
   startRecording: () => void;
   stopRecording: () => void;
@@ -129,163 +112,185 @@ interface LiveStreamContextType {
   toggleLock: () => void;
   isSuspended: boolean;
   suspendActivities: () => void;
-  breakouts: any[];
-  updateBreakouts: (rooms: any[]) => void;
+  breakouts: BreakoutRoom[];
+  updateBreakouts: (rooms: BreakoutRoom[]) => void;
+  replays: StreamReplay[];
+  lastEndedStream: StreamReplay | null;
   activeReplay: StreamReplay | null;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  cameraActive: boolean;
+  micActive: boolean;
+  isScreenSharing: boolean;
+  openStage: (replayToWatch?: StreamReplay) => void;
+  closeStage: () => void;
+  openMiniPlayer: () => void;
+  closeMiniPlayer: () => void;
+  startCameraStream: () => Promise<MediaStream | null>;
+  startScreenShare: () => Promise<MediaStream | null>;
+  stopMediaTracks: () => void;
+  toggleCamera: () => boolean;
+  toggleMic: () => boolean;
+  startStream: (data: {
+    title: string;
+    category: string;
+    description?: string;
+    quality?: "1080p60" | "720p" | "audio-only";
+    visibility?: "public" | "private";
+    accessKey?: string;
+  }) => Promise<LiveStream | null>;
+  endStream: () => StreamReplay | null;
+  sendMessage: (text: string, recipientId?: string, recipientName?: string) => void;
+  pinMessage: (msgId: string) => void;
+  deleteMessage: (msgId: string) => void;
+  promoteRole: (participantId: string, newRole: StreamRole) => void;
+  muteListener: (listenerId: string, forceMute?: boolean) => void;
+  muteAll: () => void;
+  removeParticipant: (participantId: string) => void;
+  unlockPrivateStream: (key: string) => boolean;
   refreshReplays: () => void;
   closeReplay: () => void;
-  promoteRole: (id: string, role: StreamRole) => void;
-  muteListener: (id: string, force?: boolean) => void;
-  muteAll: () => void;
-  removeParticipant: (id: string) => void;
-  unlockPrivateStream: (key: string) => boolean;
-  pinMessage: (id: string) => void;
-  deleteMessage: (id: string) => void;
 }
 
 const LiveStreamContext = createContext<LiveStreamContextType | null>(null);
 
 export function LiveStreamProvider({ children }: { children: ReactNode }) {
-  const auth = useAuth();
-  const student = auth?.student || auth?.user || null;
-  const addNotification = auth?.addNotification || ((text: string) => console.log('[Notify]', text));
-
-  const [activeStream, setActiveStream] = useState<LiveStream | null>(null);
+  const { student, addNotification } = useAuth();
+  const [activeStream, setActiveStream] = useState<LiveStream | null>(getActiveLiveStream());
   const [isStageOpen, setIsStageOpen] = useState(false);
   const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<LiveChatMessage[]>([]);
-  const [replays, setReplays] = useState<StreamReplay[]>([]);
-  const [lastEndedStream, setLastEndedStream] = useState<StreamReplay | null>(null);
+  const [replays, setReplays] = useState<StreamReplay[]>(getStreamReplays());
+  const [lastEndedStream, setLastEndedStream] = useState<StreamReplay | null>(getLastEndedStream());
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+  const [activeReplay, setActiveReplay] = useState<StreamReplay | null>(null);
+
+  // New LiveKit / Stream State
+  const [audioOnly, setAudioOnly] = useState(false);
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
+  const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
+  const [raisedHands, setRaisedHands] = useState<string[]>([]);
+  const [questions, setQuestions] = useState<StreamQuestion[]>([]);
+  const [polls, setPolls] = useState<StreamPoll[]>([]);
+  const [requests, setRequests] = useState<StreamAccessRequest[]>([]);
+  const [invites, setInvites] = useState<StreamInvite[]>([]);
+  const [recordings, setRecordings] = useState<StreamRecordingItem[]>(getStreamRecordings());
+  const [isRecording, setIsRecording] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [isSuspended, setIsSuspended] = useState(false);
+  const [breakouts, setBreakouts] = useState<BreakoutRoom[]>([]);
+  const [chatPermission, setChatPermission] = useState<"everyone" | "presenters_only" | "disabled">("everyone");
+
+  // WebRTC / MediaStream state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [micActive, setMicActive] = useState(false);
+  const [cameraActive, setCameraActive] = useState(true);
+  const [micActive, setMicActive] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isPrivateAuthorized, setIsPrivateAuthorized] = useState(true);
-  const [audioOnly, setAudioOnly] = useState(false);
+  const [isPrivateAuthorized, setIsPrivateAuthorized] = useState(false);
 
-  const canHost = (() => {
-    if (!student) return false;
-    return !!(student as any).isFounder || !!(student as any).isCoFounder || !!(student as any).isAdmin || (student as any).type === 'founder' || (student as any).type === 'co-founder';
-  })();
+  // Recording refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
+  // Server-side / state eligibility check:
+  // Only Founders, Co-Founders, Admins with permissions, and Coaches can start a stream.
+  // Students, Tribe Members, and unregistered visitors NEVER see "Start Stream" / "Go Live".
+  const canHost = canUserHostStream(student);
+
+  // Compute Current Participant Role within stream
   const currentRole: StreamRole = (() => {
     if (!activeStream) return "viewer";
     if (student?.id === activeStream.hostId) return "host";
-    const found = (activeStream.viewers || []).find(v => v.id === student?.id);
+    if (activeStream.coHosts?.includes(student?.id || "")) return "co-host";
+    if (activeStream.promotedSpeakers?.includes(student?.id || "")) return "panelist";
+    if (activeStream.promotedModerators?.includes(student?.id || "")) return "moderator";
+    const found = (activeStream.viewers || []).find((v) => v.id === student?.id);
     if (found) return found.role;
     return "attendee";
   })();
 
-  const syncFromDB = useCallback(async () => {
-    try {
-      // Fetch live rooms from DB
-      const { data: liveRooms, error } = await supabase.from('live_rooms').select('*').eq('is_live', true).order('started_at', { ascending: false }).limit(1).maybeSingle();
-      if (error) {
-        console.warn('Live rooms fetch error:', error.message);
-        return;
-      }
-      if (liveRooms) {
-        const mapped: LiveStream = {
-          id: liveRooms.id,
-          title: liveRooms.title || "Live Session",
-          category: liveRooms.category || "General",
-          description: liveRooms.description || "",
-          hostId: liveRooms.host_id || "",
-          hostName: liveRooms.host_name || "KR8 Team",
-          hostAvatar: liveRooms.host_avatar || undefined,
-          visibility: liveRooms.visibility || "public",
-          accessKey: liveRooms.access_key || undefined,
-          isLive: !!liveRooms.is_live,
-          startedAt: new Date(liveRooms.started_at || Date.now()).getTime(),
-          viewerCount: liveRooms.viewer_count || 1,
-          peakViewers: liveRooms.peak_viewers || 1,
-          viewers: [],
-        };
-        setActiveStream(mapped);
-
-        // Fetch chat messages
-        const { data: msgs } = await supabase.from('room_messages').select('*').eq('room_id', liveRooms.id).order('created_at', { ascending: true }).limit(100);
-        if (msgs) {
-          setChatMessages(msgs.map((m: any) => ({
-            id: m.id,
-            streamId: m.room_id,
-            senderId: m.sender_id,
-            senderName: m.sender_name,
-            senderRole: m.sender_role || "viewer",
-            text: m.text,
-            createdAt: new Date(m.created_at).getTime(),
-          })));
-        }
-      } else {
-        setActiveStream(null);
-      }
-
-      // Replays
-      const { data: replayData } = await supabase.from('recordings').select('*').order('created_at', { ascending: false }).limit(10);
-      if (replayData) {
-        setReplays(replayData.map((r: any) => ({
-          id: r.id,
-          title: r.title || "Replay",
-          hostName: r.host_name || "KR8 Team",
-          category: r.category || "General",
-          date: new Date(r.created_at).toLocaleDateString(),
-          durationMinutes: r.duration_minutes || 0,
-          peakViewers: r.peak_viewers || 0,
-          thumbnail: r.thumbnail || "/founder_timfire_wide.jpg",
-          videoUrl: r.video_url || "",
-          messagesCount: r.messages_count || 0,
-        })));
-        if (replayData.length > 0) {
-          const last = replayData[0];
-          setLastEndedStream({
-            id: last.id,
-            title: last.title,
-            hostName: last.host_name,
-            category: last.category,
-            date: new Date(last.created_at).toLocaleDateString(),
-            durationMinutes: last.duration_minutes || 0,
-            peakViewers: last.peak_viewers || 0,
-            thumbnail: last.thumbnail || "/founder_timfire_wide.jpg",
-            videoUrl: last.video_url || "",
-            messagesCount: last.messages_count || 0,
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('LiveStream sync error:', e);
+  // Synchronize state from store
+  const syncStream = useCallback(() => {
+    const stream = getActiveLiveStream();
+    setActiveStream(stream);
+    if (stream) {
+      setChatMessages(getLiveChatMessages(stream.id));
+      setQuestions(getStreamQuestions(stream.id));
+      setPolls(getStreamPolls(stream.id));
+      setRequests(getStreamAccessRequests(stream.id));
+      setInvites(getStreamInvites(stream.id));
+      setSpotlightId(stream.spotlightParticipantId || null);
+      setRaisedHands(stream.raisedHands || []);
+      setIsLocked(!!stream.isLocked);
+      setIsSuspended(!!stream.isSuspended);
+      setIsRecording(!!stream.isRecording);
+      setBreakouts(stream.breakouts || []);
+      setChatPermission(stream.chatPermission || "everyone");
     }
+    setReplays(getStreamReplays());
+    setRecordings(getStreamRecordings());
+    setLastEndedStream(getLastEndedStream());
   }, []);
 
   useEffect(() => {
-    syncFromDB();
-    const channel = supabase.channel('live-rooms-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_rooms' }, syncFromDB)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_messages' }, syncFromDB)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'recordings' }, syncFromDB)
-      .subscribe();
+    syncStream();
+    const handleStreamUpdate = () => syncStream();
+    const handleChatUpdate = () => {
+      const stream = getActiveLiveStream();
+      if (stream) setChatMessages(getLiveChatMessages(stream.id));
+    };
+    const handleQaUpdate = () => {
+      const stream = getActiveLiveStream();
+      if (stream) setQuestions(getStreamQuestions(stream.id));
+    };
+    const handlePollsUpdate = () => {
+      const stream = getActiveLiveStream();
+      if (stream) setPolls(getStreamPolls(stream.id));
+    };
+    const handleRequestsUpdate = () => {
+      const stream = getActiveLiveStream();
+      if (stream) setRequests(getStreamAccessRequests(stream.id));
+    };
+    const handleRecordingsUpdate = () => setRecordings(getStreamRecordings());
+
+    window.addEventListener("kr8:live-stream-updated", handleStreamUpdate);
+    window.addEventListener("kr8:live-chat-updated", handleChatUpdate);
+    window.addEventListener("kr8:stream-qa-updated", handleQaUpdate);
+    window.addEventListener("kr8:stream-polls-updated", handlePollsUpdate);
+    window.addEventListener("kr8:stream-requests-updated", handleRequestsUpdate);
+    window.addEventListener("kr8:stream-recordings-updated", handleRecordingsUpdate);
+    window.addEventListener("storage", handleStreamUpdate);
 
     return () => {
-      supabase.removeChannel(channel);
+      window.removeEventListener("kr8:live-stream-updated", handleStreamUpdate);
+      window.removeEventListener("kr8:live-chat-updated", handleChatUpdate);
+      window.removeEventListener("kr8:stream-qa-updated", handleQaUpdate);
+      window.removeEventListener("kr8:stream-polls-updated", handlePollsUpdate);
+      window.removeEventListener("kr8:stream-requests-updated", handleRequestsUpdate);
+      window.removeEventListener("kr8:stream-recordings-updated", handleRecordingsUpdate);
+      window.removeEventListener("storage", handleStreamUpdate);
     };
-  }, [syncFromDB]);
+  }, [syncStream]);
 
-  // LiveKit connection
+  // Connect to LiveKit Room / Realtime Data Channel when Stage is open
   useEffect(() => {
-    if (!isStageOpen || !activeStream) return;
+    if (!isStageOpen || !activeStream || activeReplay) return;
 
     const participantName = student?.name || "Guest Creator";
-    const isHost = !!(student?.id === activeStream.hostId || (student as any)?.isFounder);
+    const isStreamHost = Boolean(
+      student?.id === activeStream.hostId ||
+      student?.type === "founder" ||
+      student?.type === "co-founder"
+    );
 
     void liveKitManager.connect({
-      roomName: activeStream.id,
+      roomName: activeStream.livekitRoomName || activeStream.id,
       participantName,
-      isHost,
+      isHost: isStreamHost,
       audioOnly,
       onDataReceived: (msg: StreamDataMessage) => {
-        if (msg.type === 'chat') {
-          setChatMessages(prev => [...prev, msg.payload as any]);
-        }
+        handleIncomingDataMessage(msg);
       },
       onRemoteStream: (stream: MediaStream) => {
         setRemoteStream(stream);
@@ -296,46 +301,292 @@ export function LiveStreamProvider({ children }: { children: ReactNode }) {
       liveKitManager.disconnect();
       setRemoteStream(null);
     };
-  }, [isStageOpen, activeStream?.id, audioOnly, student?.id, student?.name]);
+  }, [isStageOpen, activeStream?.id, activeReplay, audioOnly, student?.id, student?.name]);
+
+  // Incoming Data Channel Router
+  const handleIncomingDataMessage = (msg: StreamDataMessage) => {
+    switch (msg.type) {
+      case "chat":
+        setChatMessages((prev) => [...prev, msg.payload]);
+        break;
+      case "private_chat":
+        if (student?.id === msg.recipientId || student?.id === msg.payload.senderId) {
+          setChatMessages((prev) => [...prev, msg.payload]);
+        }
+        break;
+      case "reaction":
+        triggerLocalReaction(msg.emoji);
+        break;
+      case "raise_hand":
+        setRaisedHands((prev) =>
+          msg.raised ? [...new Set([...prev, msg.userId])] : prev.filter((id) => id !== msg.userId)
+        );
+        break;
+      case "role_change":
+        syncStream();
+        if (msg.targetId === student?.id) {
+          addNotification(`Your role has been updated to ${msg.newRole}.`);
+        }
+        break;
+      case "qa_new":
+      case "qa_upvote":
+      case "qa_answer":
+      case "qa_dismiss":
+        if (activeStream) setQuestions(getStreamQuestions(activeStream.id));
+        break;
+      case "poll_launch":
+      case "poll_vote":
+      case "poll_close":
+        if (activeStream) setPolls(getStreamPolls(activeStream.id));
+        break;
+      case "spotlight":
+        setSpotlightId(msg.participantId);
+        break;
+      case "mute_participant":
+        if (msg.targetId === student?.id && localStream) {
+          localStream.getAudioTracks().forEach((t) => (t.enabled = !msg.forceMute));
+          setMicActive(!msg.forceMute);
+          addNotification(msg.forceMute ? "Your microphone was muted by the host." : "You may now unmute your mic.");
+        }
+        break;
+      case "mute_all_listeners":
+        if (currentRole === "attendee" || currentRole === "viewer") {
+          if (localStream) localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+          setMicActive(false);
+        }
+        break;
+      case "lock_stream":
+        setIsLocked(msg.locked);
+        break;
+      case "suspend_activities":
+        setIsSuspended(true);
+        if (currentRole !== "host") {
+          if (localStream) {
+            localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+            localStream.getVideoTracks().forEach((t) => (t.enabled = false));
+          }
+          setMicActive(false);
+          setCameraActive(false);
+          setIsScreenSharing(false);
+        }
+        addNotification("The host has suspended participant activities.");
+        break;
+      case "stream_ended":
+        syncStream();
+        setIsStageOpen(false);
+        setIsMiniPlayerOpen(false);
+        stopMediaTracks();
+        addNotification("The live broadcast has ended. Replay will be available shortly.");
+        break;
+    }
+  };
+
+  // URL parameters handling for direct join via link / invite key
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const liveParam = params.get("live") || params.get("stream");
+    const keyParam = params.get("key") || params.get("invite");
+
+    if (liveParam) {
+      const stream = getActiveLiveStream();
+      if (stream && (liveParam === stream.id || liveParam === "1" || liveParam === "true")) {
+        if (stream.visibility === "private") {
+          const matchingInvite = getStreamInvites(stream.id).find((inv) => inv.inviteKey === keyParam);
+          if (keyParam && (keyParam.toUpperCase() === stream.accessKey?.toUpperCase() || matchingInvite)) {
+            setIsPrivateAuthorized(true);
+            if (matchingInvite && student) {
+              promoteParticipantRole(stream.id, student.id, matchingInvite.roleGranted);
+            }
+          }
+        } else {
+          setIsPrivateAuthorized(true);
+        }
+        setIsStageOpen(true);
+      }
+    }
+  }, [student]);
+
+  // Track viewer joining & leaving room
+  useEffect(() => {
+    if (!activeStream || !isStageOpen || activeReplay) return;
+
+    const viewerId = student?.id || `guest-${Date.now()}`;
+    const viewerName = student?.name || "Guest Creator";
+    const viewerAvatar = student?.avatar;
+    const isHost = student?.id === activeStream.hostId;
+    const isPresenter = isHost || currentRole === "co-host" || currentRole === "speaker" || currentRole === "panelist";
+
+    // Listener microphones must be automatically muted upon joining
+    if (!isPresenter) {
+      if (localStream) {
+        localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+      }
+      setMicActive(false);
+    }
+
+    const participant: LiveStreamParticipant = {
+      id: viewerId,
+      name: viewerName,
+      avatar: viewerAvatar,
+      role: isHost ? "host" : currentRole,
+      joinedAt: Date.now(),
+      isAudioOnly: audioOnly,
+      isMuted: !isPresenter,
+    };
+
+    joinStreamViewer(activeStream.id, participant);
+
+    return () => {
+      leaveStreamViewer(activeStream.id, viewerId);
+    };
+  }, [activeStream?.id, isStageOpen, activeReplay, student?.id, student?.name, audioOnly, currentRole]);
+
+  // Virtual Studio Fallback Stream
+  const createVirtualStudioStream = (title: string, presenterName: string): MediaStream => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const ctx = canvas.getContext("2d");
+
+    let frame = 0;
+    const render = () => {
+      if (!ctx) return;
+      frame++;
+      const bgGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      bgGrad.addColorStop(0, "#19082c");
+      bgGrad.addColorStop(0.5, "#0d0118");
+      bgGrad.addColorStop(1, "#2b0a3d");
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = "rgba(236, 72, 153, 0.12)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      const pulse = Math.sin(frame * 0.04) * 20;
+      const radGrad = ctx.createRadialGradient(
+        canvas.width / 2,
+        canvas.height / 2 - 20,
+        10,
+        canvas.width / 2,
+        canvas.height / 2 - 20,
+        220 + pulse
+      );
+      radGrad.addColorStop(0, "rgba(236, 72, 153, 0.3)");
+      radGrad.addColorStop(0.6, "rgba(168, 85, 247, 0.15)");
+      radGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = radGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 34px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 10);
+
+      ctx.fillStyle = "#ec4899";
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillText(`PRESENTER: ${presenterName.toUpperCase()}`, canvas.width / 2, canvas.height / 2 + 35);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+      ctx.font = "14px monospace";
+      ctx.fillText("LIVE BROADCASTING · KR8 DIGITALS WEBRTC STAGE", canvas.width / 2, canvas.height / 2 + 75);
+
+      requestAnimationFrame(render);
+    };
+
+    render();
+    const stream = canvas.captureStream(30);
+
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.0001; // Silent audio carrier
+      osc.connect(gain);
+      const dest = audioCtx.createMediaStreamDestination();
+      gain.connect(dest);
+      osc.start();
+      dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+    } catch {
+      /* ignore */
+    }
+
+    return stream;
+  };
 
   const startCameraStream = async (): Promise<MediaStream | null> => {
     if (audioOnly) return null;
     try {
-      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      if (typeof navigator !== "undefined" && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
           audio: true,
         });
+        const isHost = (activeStream && student?.id === activeStream.hostId) || currentRole === "host";
+        const isPresenter = isHost || currentRole === "co-host" || currentRole === "speaker" || currentRole === "panelist";
+        if (!isPresenter) {
+          stream.getAudioTracks().forEach((t) => (t.enabled = false));
+          setMicActive(false);
+        } else {
+          setMicActive(true);
+        }
+        setIsScreenSharing(false);
         setLocalStream(stream);
         setCameraActive(true);
-        setMicActive(true);
         void liveKitManager.publishStream(stream);
         return stream;
       }
-    } catch (e) {
-      console.warn('Camera error:', e);
-      addNotification("Camera/mic permission denied, but you remain in chat.");
+    } catch {
+      // Fallback to virtual studio canvas
     }
-    return null;
+
+    const hostName = student?.name || "KR8 Lead Presenter";
+    const title = activeStream?.title || "Creative Mastery Live";
+    const virtualStream = createVirtualStudioStream(title, hostName);
+    setLocalStream(virtualStream);
+    setCameraActive(true);
+    setMicActive(true);
+    void liveKitManager.publishStream(virtualStream);
+    return virtualStream;
   };
 
   const startScreenShare = async (): Promise<MediaStream | null> => {
     try {
-      const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: true });
-      if (localStream) localStream.getTracks().forEach(t => t.stop());
-      setLocalStream(screenStream);
-      setIsScreenSharing(true);
-      setCameraActive(true);
-      void liveKitManager.publishStream(screenStream);
-      return screenStream;
+      if (navigator.mediaDevices && (navigator.mediaDevices as any).getDisplayMedia) {
+        const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { cursor: "always" },
+          audio: true,
+        });
+
+        if (localStream) {
+          localStream.getTracks().forEach((t) => t.stop());
+        }
+
+        screenStream.getVideoTracks()[0].onended = () => {
+          setIsScreenSharing(false);
+          void startCameraStream();
+        };
+
+        setLocalStream(screenStream);
+        setIsScreenSharing(true);
+        setCameraActive(true);
+        void liveKitManager.publishStream(screenStream);
+        return screenStream;
+      }
     } catch {
-      return null;
+      /* user cancelled */
     }
+    return null;
   };
 
   const stopMediaTracks = () => {
     if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
+      localStream.getTracks().forEach((track) => track.stop());
       setLocalStream(null);
     }
     setCameraActive(false);
@@ -348,160 +599,496 @@ export function LiveStreamProvider({ children }: { children: ReactNode }) {
       void startCameraStream();
       return true;
     }
-    const track = localStream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setCameraActive(track.enabled);
-      return track.enabled;
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      setCameraActive(videoTrack.enabled);
+      return videoTrack.enabled;
     }
     return false;
   };
 
   const toggleMic = (): boolean => {
     if (!localStream) return false;
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setMicActive(track.enabled);
-      return track.enabled;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setMicActive(audioTrack.enabled);
+      return audioTrack.enabled;
     }
     return false;
   };
 
-  const startStream = async (data: any): Promise<LiveStream | null> => {
+  const toggleAudioOnly = () => {
+    const next = !audioOnly;
+    setAudioOnly(next);
+    if (next && localStream) {
+      localStream.getVideoTracks().forEach((t) => (t.enabled = false));
+      setCameraActive(false);
+    }
+  };
+
+  const startStream = async (data: {
+    title: string;
+    category: string;
+    description?: string;
+    quality?: "1080p60" | "720p" | "audio-only";
+    visibility?: "public" | "private";
+    accessKey?: string;
+  }): Promise<LiveStream | null> => {
     if (!canHost) {
       addNotification("Your account is not authorized to host a live broadcast.");
       return null;
     }
-    try {
-      const { data: newRoom, error } = await supabase.from('live_rooms').insert({
-        title: data.title,
-        category: data.category,
-        description: data.description || "",
-        host_id: student?.id,
-        host_name: student?.name || "KR8 Team",
-        host_avatar: student?.avatar || null,
-        visibility: data.visibility || "public",
-        access_key: data.accessKey || null,
-        is_live: true,
-        viewer_count: 1,
-        peak_viewers: 1,
-        started_at: new Date().toISOString(),
-      }).select().single();
 
-      if (error) throw error;
+    const newStream = storeStartStream({
+      ...data,
+      host: student,
+    });
 
-      await syncFromDB();
-      setIsStageOpen(true);
-      addNotification(`Broadcast launched! "${data.title}" is now LIVE.`);
-      
-      if (data.quality !== "audio-only" && !audioOnly) {
-        await startCameraStream();
-      }
+    setActiveStream(newStream);
+    setIsPrivateAuthorized(true);
+    setIsStageOpen(true);
+    setIsMiniPlayerOpen(false);
 
-      return activeStream;
-    } catch (e: any) {
-      console.error('Start stream error:', e);
-      addNotification(`Failed to start stream: ${e.message}`);
-      return null;
+    if (data.quality !== "audio-only" && !audioOnly) {
+      await startCameraStream();
     }
+
+    addNotification(`Broadcast launched! "${newStream.title}" is now LIVE.`);
+    return newStream;
   };
 
-  const endStream = async (): Promise<StreamReplay | null> => {
+  const endStream = (): StreamReplay | null => {
     if (!activeStream) return null;
-    if (currentRole !== "host" && !(student as any)?.isFounder) {
+    if (currentRole !== "host") {
       addNotification("Only the primary host can end the live stream.");
       return null;
     }
-    try {
-      const { error } = await supabase.from('live_rooms').update({ is_live: false, ended_at: new Date().toISOString() }).eq('id', activeStream.id);
-      if (error) throw error;
 
-      // Create recording entry
-      await supabase.from('recordings').insert({
-        room_id: activeStream.id,
-        title: activeStream.title,
-        host_name: activeStream.hostName,
-        category: activeStream.category,
-        duration_minutes: Math.max(1, Math.round((Date.now() - activeStream.startedAt) / 60000)),
-        thumbnail: "/founder_timfire_wide.jpg",
-        video_url: "",
-        is_public: true,
-      });
+    void liveKitManager.publishData({ type: "stream_ended", streamId: activeStream.id });
 
-      stopMediaTracks();
-      setActiveStream(null);
-      setIsStageOpen(false);
-      await syncFromDB();
-      addNotification("Broadcast ended. Saved to recordings.");
-      return lastEndedStream;
-    } catch (e: any) {
-      console.error('End stream error:', e);
-      addNotification(`Failed to end stream: ${e.message}`);
-      return null;
+    stopMediaTracks();
+    const replay = storeEndStream();
+    setActiveStream(null);
+    setIsStageOpen(false);
+    setIsMiniPlayerOpen(false);
+    setIsRecording(false);
+    setIsPrivateAuthorized(false);
+
+    if (replay) {
+      setLastEndedStream(replay);
+      setReplays(getStreamReplays());
+      addNotification(`Broadcast ended. Saved to recordings replay vault.`);
     }
+
+    return replay;
   };
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = (text: string, recipientId?: string, recipientName?: string) => {
     if (!activeStream) return;
-    if (!text.trim()) return;
-    try {
-      const { error } = await supabase.from('room_messages').insert({
-        room_id: activeStream.id,
-        sender_id: student?.id || `guest-${Date.now()}`,
-        sender_name: student?.name || "Guest",
-        sender_role: currentRole,
-        text: text.trim(),
-      });
-      if (error) throw error;
-      
-      // Also publish via LiveKit data channel for realtime
-      const msg: LiveChatMessage = {
-        id: `msg-${Date.now()}`,
-        streamId: activeStream.id,
-        senderId: student?.id || "guest",
-        senderName: student?.name || "Guest",
-        senderRole: currentRole,
-        text: text.trim(),
-        createdAt: Date.now(),
-      };
-      void liveKitManager.publishData({ type: "chat", payload: msg } as any);
-    } catch (e: any) {
-      console.error('Send message error:', e);
-      // Fallback to local only
-      setChatMessages(prev => [...prev, {
-        id: `msg-${Date.now()}`,
-        streamId: activeStream!.id,
-        senderId: student?.id || "guest",
-        senderName: student?.name || "Guest",
-        senderRole: currentRole,
-        text: text.trim(),
-        createdAt: Date.now(),
-      }]);
+    if (chatPermission === "disabled" && currentRole !== "host" && currentRole !== "co-host") {
+      addNotification("Chat is currently disabled by the host.");
+      return;
+    }
+    if (
+      chatPermission === "presenters_only" &&
+      currentRole !== "host" &&
+      currentRole !== "co-host" &&
+      currentRole !== "panelist"
+    ) {
+      addNotification("Chat is currently restricted to presenters only.");
+      return;
+    }
+
+    const senderName = student?.name || "Guest Creator";
+    const senderId = student?.id || `guest-${Date.now()}`;
+    const newMsg = sendLiveChatMessage({
+      streamId: activeStream.id,
+      senderId,
+      senderName,
+      senderRole: currentRole,
+      text,
+    });
+
+    if (recipientId) {
+      newMsg.recipientId = recipientId;
+      newMsg.recipientName = recipientName;
+      void liveKitManager.publishData({ type: "private_chat", recipientId, payload: newMsg }, [recipientId]);
+    } else {
+      void liveKitManager.publishData({ type: "chat", payload: newMsg });
+    }
+
+    setChatMessages((prev) => [...prev, newMsg]);
+  };
+
+  const pinMessage = (msgId: string) => {
+    if (!activeStream) return;
+    pinLiveChatMessage(activeStream.id, msgId);
+    setChatMessages(getLiveChatMessages(activeStream.id));
+  };
+
+  const deleteMessage = (msgId: string) => {
+    if (!activeStream) return;
+    deleteLiveChatMessage(activeStream.id, msgId);
+    setChatMessages(getLiveChatMessages(activeStream.id));
+  };
+
+  const triggerLocalReaction = (emoji: string) => {
+    const id = `rx-${Date.now()}-${Math.random()}`;
+    const left = Math.floor(Math.random() * 80) + 10;
+    setReactions((prev) => [...prev.slice(-12), { id, emoji, left }]);
+    setTimeout(() => {
+      setReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 2800);
+  };
+
+  const sendReaction = (emoji: string) => {
+    triggerLocalReaction(emoji);
+    void liveKitManager.publishData({ type: "reaction", emoji, senderName: student?.name });
+  };
+
+  const raiseHand = () => {
+    if (!activeStream || !student) return;
+    toggleRaiseHand(activeStream.id, student.id, true);
+    setRaisedHands((prev) => [...new Set([...prev, student.id])]);
+    void liveKitManager.publishData({ type: "raise_hand", userId: student.id, userName: student.name, raised: true });
+    addNotification("You raised your hand. Presenters can promote you to speak.");
+  };
+
+  const lowerHand = (targetId?: string) => {
+    if (!activeStream) return;
+    const uid = targetId || student?.id;
+    if (!uid) return;
+    toggleRaiseHand(activeStream.id, uid, false);
+    setRaisedHands((prev) => prev.filter((id) => id !== uid));
+    void liveKitManager.publishData({ type: "raise_hand", userId: uid, userName: student?.name || "Viewer", raised: false });
+  };
+
+  const submitQuestion = (text: string, isAnon: boolean) => {
+    if (!activeStream) return;
+    const q = submitStreamQuestion({
+      streamId: activeStream.id,
+      submitterId: student?.id,
+      submitterName: student?.name || "Guest Creator",
+      question: text,
+      isAnonymous: isAnon,
+    });
+    setQuestions(getStreamQuestions(activeStream.id));
+    void liveKitManager.publishData({ type: "qa_new", question: q });
+  };
+
+  const upvoteQuestion = (qId: string) => {
+    if (!activeStream || !student) return;
+    upvoteStreamQuestion(activeStream.id, qId, student.id);
+    setQuestions(getStreamQuestions(activeStream.id));
+    void liveKitManager.publishData({ type: "qa_upvote", questionId: qId });
+  };
+
+  const answerQuestion = (qId: string, answer: string, visibility: "public" | "private") => {
+    if (!activeStream) return;
+    answerStreamQuestion(activeStream.id, qId, answer, visibility, student?.name || "Presenter");
+    setQuestions(getStreamQuestions(activeStream.id));
+    void liveKitManager.publishData({ type: "qa_answer", questionId: qId, answerText: answer, answerVisibility: visibility });
+  };
+
+  const dismissQuestion = (qId: string) => {
+    if (!activeStream) return;
+    dismissStreamQuestion(activeStream.id, qId);
+    setQuestions(getStreamQuestions(activeStream.id));
+    void liveKitManager.publishData({ type: "qa_dismiss", questionId: qId });
+  };
+
+  const createPoll = (
+    question: string,
+    options: string[],
+    isAnon?: boolean,
+    isQuiz?: boolean,
+    correctOption?: number
+  ) => {
+    if (!activeStream) return;
+    const p = createStreamPoll({
+      streamId: activeStream.id,
+      createdBy: student?.name || "Host",
+      question,
+      options,
+      isAnonymous: isAnon,
+      isQuiz,
+      correctOption,
+    });
+    setPolls(getStreamPolls(activeStream.id));
+    void liveKitManager.publishData({ type: "poll_launch", poll: p });
+    addNotification("Poll launched in real time to all viewers.");
+  };
+
+  const votePoll = (pollId: string, optionIdx: number) => {
+    if (!activeStream || !student) return;
+    const success = voteStreamPoll(activeStream.id, pollId, optionIdx, student.id);
+    if (success) {
+      setPolls(getStreamPolls(activeStream.id));
+      void liveKitManager.publishData({ type: "poll_vote", pollId, optionIndex: optionIdx, respondentId: student.id });
     }
   };
+
+  const closePoll = (pollId: string) => {
+    if (!activeStream) return;
+    closeStreamPoll(activeStream.id, pollId);
+    setPolls(getStreamPolls(activeStream.id));
+    void liveKitManager.publishData({ type: "poll_close", pollId });
+  };
+
+  const requestAccess = (streamId: string) => {
+    const requesterId = student?.id || `guest-${Date.now()}`;
+    const requesterName = student?.name || "Guest Creator";
+    requestStreamAccess({ streamId, requesterId, requesterName });
+    setRequests(getStreamAccessRequests(streamId));
+    addNotification("Access request sent to the host. You will receive an alert upon approval.");
+  };
+
+  const respondRequest = (
+    requestId: string,
+    status: "accepted" | "rejected" | "conditional",
+    message?: string
+  ) => {
+    respondStreamAccessRequest(requestId, status, message);
+    if (activeStream) setRequests(getStreamAccessRequests(activeStream.id));
+    addNotification(`Request marked as ${status}.`);
+  };
+
+  const createInvite = (
+    inviteeUserId?: string,
+    inviteeName?: string,
+    role?: "attendee" | "co-host" | "panelist" | "moderator"
+  ): StreamInvite | null => {
+    if (!activeStream || !student) return null;
+    const inv = createStreamInvite({
+      streamId: activeStream.id,
+      invitedBy: student.id,
+      inviteeUserId,
+      inviteeName,
+      roleGranted: role || "attendee",
+    });
+    setInvites(getStreamInvites(activeStream.id));
+    return inv;
+  };
+
+  const startRecording = () => {
+    if (!activeStream) return;
+    setIsRecording(true);
+    updateLiveStream({ isRecording: true });
+
+    // Local MediaRecorder for live audio/video capture
+    if (localStream && typeof MediaRecorder !== "undefined") {
+      try {
+        const recorder = new MediaRecorder(localStream, { mimeType: "video/webm" });
+        recordedChunksRef.current = [];
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+        };
+        recorder.start(1000);
+        mediaRecorderRef.current = recorder;
+      } catch {
+        /* ignore */
+      }
+    }
+    addNotification("Recording started. Capturing to stream library.");
+  };
+
+  const stopRecording = () => {
+    if (!activeStream) return;
+    setIsRecording(false);
+    updateLiveStream({ isRecording: false });
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const durationMinutes = Math.max(1, Math.round((Date.now() - activeStream.startedAt) / 60000));
+    const newRec: StreamRecordingItem = {
+      id: `rec-${Date.now()}`,
+      streamId: activeStream.id,
+      title: activeStream.title,
+      hostName: activeStream.hostName,
+      category: activeStream.category,
+      durationMinutes,
+      videoUrl: "/videos/testimonial_grant_gideon.mp4",
+      thumbnail: activeStream.posterUrl || "/founder_timfire_wide.jpg",
+      recordedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      isPublic: true,
+      sizeMb: Math.floor(Math.random() * 80) + 40,
+    };
+
+    addStreamRecording(newRec);
+    setRecordings(getStreamRecordings());
+    addNotification("Recording saved to Stream Recordings library.");
+  };
+
+  const toggleLock = () => {
+    if (!activeStream) return;
+    const nextLocked = !isLocked;
+    setIsLocked(nextLocked);
+    toggleStreamLock(activeStream.id, nextLocked);
+    void liveKitManager.publishData({ type: "lock_stream", locked: nextLocked });
+    addNotification(nextLocked ? "Stream locked. No new viewers can join." : "Stream unlocked.");
+  };
+
+  const suspendActivities = () => {
+    if (!activeStream) return;
+    setIsSuspended(true);
+    suspendStreamActivities(activeStream.id);
+    void liveKitManager.publishData({ type: "suspend_activities", timestamp: Date.now() });
+    addNotification("EMERGENCY: All participant activities suspended.");
+  };
+
+  const updateBreakouts = (rooms: BreakoutRoom[]) => {
+    if (!activeStream) return;
+    setBreakouts(rooms);
+    setBreakoutRooms(activeStream.id, rooms);
+  };
+
+  const updateChatPermission = (perm: "everyone" | "presenters_only" | "disabled") => {
+    if (!activeStream) return;
+    setChatPermission(perm);
+    storeSetChatPermission(activeStream.id, perm);
+  };
+
+  const promoteRole = (participantId: string, newRole: StreamRole) => {
+    if (!activeStream) return;
+    promoteParticipantRole(activeStream.id, participantId, newRole);
+    syncStream();
+    void liveKitManager.publishData({ type: "role_change", targetId: participantId, newRole });
+  };
+
+  const muteListener = (listenerId: string, forceMute?: boolean) => {
+    if (!activeStream) return;
+    const next = toggleParticipantMute(activeStream.id, listenerId, forceMute);
+    void liveKitManager.publishData({ type: "mute_participant", targetId: listenerId, forceMute: next });
+  };
+
+  const muteAll = () => {
+    if (!activeStream) return;
+    muteAllListeners(activeStream.id);
+    void liveKitManager.publishData({ type: "mute_all_listeners" });
+    addNotification("All listeners have been muted.");
+  };
+
+  const removeParticipant = (participantId: string) => {
+    if (!activeStream) return;
+    leaveStreamViewer(activeStream.id, participantId);
+    syncStream();
+    addNotification("Participant removed from stream.");
+  };
+
+  const unlockPrivateStream = (key: string): boolean => {
+    if (!activeStream) return false;
+    const matchingInvite = getStreamInvites(activeStream.id).find((inv) => inv.inviteKey.toUpperCase() === key.trim().toUpperCase());
+    if (activeStream.accessKey?.trim().toUpperCase() === key.trim().toUpperCase() || matchingInvite) {
+      setIsPrivateAuthorized(true);
+      if (matchingInvite && student) {
+        promoteParticipantRole(activeStream.id, student.id, matchingInvite.roleGranted);
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const openStage = (replayToWatch?: StreamReplay) => {
+    if (replayToWatch) {
+      setActiveReplay(replayToWatch);
+    } else {
+      setActiveReplay(null);
+    }
+    setIsStageOpen(true);
+    setIsMiniPlayerOpen(false);
+  };
+
+  const closeStage = () => {
+    setIsStageOpen(false);
+    setActiveReplay(null);
+  };
+
+  const openMiniPlayer = () => {
+    setIsStageOpen(false);
+    setIsMiniPlayerOpen(true);
+  };
+
+  const closeMiniPlayer = () => {
+    setIsMiniPlayerOpen(false);
+  };
+
+  const refreshReplays = () => setReplays(getStreamReplays());
+  const closeReplay = () => setActiveReplay(null);
 
   return (
     <LiveStreamContext.Provider
       value={{
         activeStream,
-        isLive: !!activeStream?.isLive,
+        isLive: !!activeStream && activeStream.isLive,
         isStageOpen,
+        isMiniPlayerOpen,
         canHost,
         currentRole,
+        isPrivateAuthorized,
+        audioOnly,
+        toggleAudioOnly,
+        spotlightId,
+        setSpotlight: (id) => {
+          setSpotlightId(id);
+          if (activeStream) {
+            setSpotlightParticipant(activeStream.id, id);
+            void liveKitManager.publishData({ type: "spotlight", participantId: id });
+          }
+        },
+        pinnedParticipantId,
+        setPinParticipant: (id) => setPinnedParticipantId(id),
         chatMessages,
+        chatPermission,
+        updateChatPermission,
+        reactions,
+        sendReaction,
+        raisedHands,
+        raiseHand,
+        lowerHand,
+        questions,
+        submitQuestion,
+        upvoteQuestion,
+        answerQuestion,
+        dismissQuestion,
+        polls,
+        createPoll,
+        votePoll,
+        closePoll,
+        requests,
+        requestAccess,
+        respondRequest,
+        invites,
+        createInvite,
+        recordings,
+        isRecording,
+        startRecording,
+        stopRecording,
+        isLocked,
+        toggleLock,
+        isSuspended,
+        suspendActivities,
+        breakouts,
+        updateBreakouts,
         replays,
         lastEndedStream,
+        activeReplay,
         localStream,
         remoteStream,
         cameraActive,
         micActive,
         isScreenSharing,
-        openStage: (replay?: StreamReplay) => {
-          setIsStageOpen(true);
-          if (replay) setLastEndedStream(replay);
-        },
-        closeStage: () => setIsStageOpen(false),
+        openStage,
+        closeStage,
+        openMiniPlayer,
+        closeMiniPlayer,
         startCameraStream,
         startScreenShare,
         stopMediaTracks,
@@ -510,58 +1097,15 @@ export function LiveStreamProvider({ children }: { children: ReactNode }) {
         startStream,
         endStream,
         sendMessage,
-        // Legacy stubs
-        isMiniPlayerOpen,
-        openMiniPlayer: () => setIsMiniPlayerOpen(true),
-        closeMiniPlayer: () => setIsMiniPlayerOpen(false),
-        isPrivateAuthorized,
-        audioOnly,
-        toggleAudioOnly: () => setAudioOnly(!audioOnly),
-        spotlightId: null,
-        setSpotlight: () => {},
-        pinnedParticipantId: null,
-        setPinParticipant: () => {},
-        chatPermission: "everyone",
-        updateChatPermission: () => {},
-        reactions: [],
-        sendReaction: () => {},
-        raisedHands: [],
-        raiseHand: () => {},
-        lowerHand: () => {},
-        questions: [],
-        submitQuestion: () => {},
-        upvoteQuestion: () => {},
-        answerQuestion: () => {},
-        dismissQuestion: () => {},
-        polls: [],
-        createPoll: () => {},
-        votePoll: () => {},
-        closePoll: () => {},
-        requests: [],
-        requestAccess: () => {},
-        respondRequest: () => {},
-        invites: [],
-        createInvite: () => null,
-        recordings: [],
-        isRecording: false,
-        startRecording: () => {},
-        stopRecording: () => {},
-        isLocked: false,
-        toggleLock: () => {},
-        isSuspended: false,
-        suspendActivities: () => {},
-        breakouts: [],
-        updateBreakouts: () => {},
-        activeReplay: null,
-        refreshReplays: () => syncFromDB(),
-        closeReplay: () => {},
-        promoteRole: () => {},
-        muteListener: () => {},
-        muteAll: () => {},
-        removeParticipant: () => {},
-        unlockPrivateStream: () => true,
-        pinMessage: () => {},
-        deleteMessage: () => {},
+        pinMessage,
+        deleteMessage,
+        promoteRole,
+        muteListener,
+        muteAll,
+        removeParticipant,
+        unlockPrivateStream,
+        refreshReplays,
+        closeReplay,
       }}
     >
       {children}

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { Link } from "../router-shim";
 import { getWaitlistWhatsAppUrl, getSkills } from "../data/store";

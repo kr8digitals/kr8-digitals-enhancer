@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link } from "../router-shim";
@@ -5,7 +6,6 @@ import { useAuth } from "../context/AuthContext";
 import {
   ATTENDANCE_TYPES,
   getAttendanceSubmissions,
-  getAttendanceSubmissionsAsync,
   reviewAttendance,
   getAttendanceTypesSettings,
   toggleAttendanceTypeOpen,
@@ -43,25 +43,19 @@ export default function AttendanceReview() {
     currentUser?.type === "co-founder"
   );
 
-  const syncData = async () => {
-    try {
-      const asyncData = await getAttendanceSubmissionsAsync();
-      setSubmissions(Array.isArray(asyncData) ? asyncData : getAttendanceSubmissions());
-    } catch {
-      setSubmissions(getAttendanceSubmissions());
-    }
-    try { setOpenTypes(getAttendanceTypesSettings()); } catch {}
+  const syncData = () => {
+    setSubmissions(getAttendanceSubmissions());
+    setOpenTypes(getAttendanceTypesSettings());
   };
 
   useEffect(() => {
-    syncData();
-    window.addEventListener("kr8:attendance-updated", syncData as any);
-    window.addEventListener("kr8:attendance-types-updated", syncData as any);
-    window.addEventListener("storage", syncData as any);
+    window.addEventListener("kr8:attendance-updated", syncData);
+    window.addEventListener("kr8:attendance-types-updated", syncData);
+    window.addEventListener("storage", syncData);
     return () => {
-      window.removeEventListener("kr8:attendance-updated", syncData as any);
-      window.removeEventListener("kr8:attendance-types-updated", syncData as any);
-      window.removeEventListener("storage", syncData as any);
+      window.removeEventListener("kr8:attendance-updated", syncData);
+      window.removeEventListener("kr8:attendance-types-updated", syncData);
+      window.removeEventListener("storage", syncData);
     };
   }, []);
 

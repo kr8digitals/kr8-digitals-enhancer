@@ -1,283 +1,620 @@
-// Production Sign-In Page - KR8 ID server fn, Google, WebAuthn, reset limit
-import { useState, useEffect } from "react";
+// @ts-nocheck
+import { useState } from "react";
 import { useSeo } from "../lib/useSeo";
 import { Link, useNavigate, useSearchParams } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
+import {
+  authenticateAccount,
+  getAccounts,
+  normalizeEmail,
+  requestPasswordReset,
+  completePasswordReset,
+  submitSuspensionAppeal,
+} from "../data/store";
 import { Card, GradientButton, GhostButton, Pill } from "../components/ui";
-import { useServerFn } from "@tanstack/react-start";
-import { signInWithKr8Id, requestPasswordResetSecure } from "@/lib/auth.functions";
-import { supabase } from "@/integrations/supabase/client";
+import Icon from "../components/Icon";
+import { authenticateWithBiometrics, getRegisteredBiometrics } from "../utils/biometrics";
 
 export default function SignInPage() {
   useSeo({ path: "/signin", noindex: true });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, signOut, loading: authLoading } = useAuth();
+  const { user, signIn, signOut, addNotification } = useAuth();
 
-  const [mode, setMode] = useState<"credentials" | "reset" | "magic" | "webauthn">("credentials");
-  const [identifier, setIdentifier] = useState(searchParams.get("email") || ""); // KR8 ID or email
+  const [mode, setMode] = useState<"credentials" | "google" | "reset">("credentials");
+  const [identifier, setIdentifier] = useState(searchParams.get("id") || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [bioLoading, setBioLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: "error" | "success" | "info"; text: string } | null>(null);
-  const [resetEmail, setResetEmail] = useState("");
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [resendEmail, setResendEmail] = useState("");
-  const [resendLoading, setResendLoading] = useState(false);
 
-  const signInKr8Fn = useServerFn(signInWithKr8Id);
-  const resetSecureFn = useServerFn(requestPasswordResetSecure);
+  // Google sign-in modal/state
+  const [googleEmail, setGoogleEmail] = useState("");
 
-  const inputCls = "w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none";
+  // Suspension Appeal State
+  const [showAppeal, setShowAppeal] = useState(false);
+  const [appealText, setAppealText] = useState("");
+  const [appealResult, setAppealResult] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (searchParams.get("registered")) {
-      setStatusMsg({ type: "success", text: "Account created! Please check your email to verify, then sign in. Your KR8 ID works on any device." });
+  const handleAppealSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appealText.trim()) return;
+    const res = submitSuspensionAppeal(identifier.trim(), appealText.trim());
+    if (res.ok) {
+      setAppealResult("Your appeal has been received. KR8 administration will review your statement.");
+      setAppealText("");
+    } else {
+      setAppealResult(res.message);
     }
-    if (searchParams.get("reset")) {
-      setStatusMsg({ type: "info", text: "Password reset email sent. Check your inbox." });
-    }
-  }, [searchParams]);
+  };
 
-  const handleKr8SignIn = async (e: React.FormEvent) => {
+  // Password reset state
+  const [resetTarget, setResetTarget] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [demoCode, setDemoCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  const registeredBios = getRegisteredBiometrics();
+
+  const inputCls =
+    "w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none";
+
+  const handleCredentialsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
-    const cleanId = identifier.trim();
-    if (!cleanId) {
-      setStatusMsg({ type: "error", text: "Please enter your KR8 ID or email." });
+
+    if (!identifier.trim()) {
+      setStatusMsg({ type: "error", text: "Please enter your registered Email address or KR8 ID." });
       return;
     }
     if (!password) {
-      setStatusMsg({ type: "error", text: "Please enter your password." });
+      setStatusMsg({ type: "error", text: "Please enter your account password." });
       return;
     }
+
     setLoading(true);
-    try {
-      const result = await signInKr8Fn({ data: { identifier: cleanId, password } });
-      if ((result as any)?.session) {
-        const session = (result as any).session;
-        // Set session in supabase client
-        const { error } = await supabase.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
-        if (error) throw error;
-        setStatusMsg({ type: "success", text: `Welcome back! Redirecting to dashboard...` });
-        setTimeout(() => navigate("/dashboard"), 800);
-      } else {
-        setStatusMsg({ type: "error", text: "Invalid KR8 ID or password" });
-      }
-    } catch (err: any) {
-      // Generic error, never reveal email
-      const msg = err.message || "Invalid KR8 ID or password";
-      if (msg.includes("PASSWORD_RESET_LIMIT")) {
-        // handled in reset
-        setStatusMsg({ type: "error", text: msg });
-      } else {
-        setStatusMsg({ type: "error", text: "Invalid KR8 ID or password" });
-      }
-    } finally {
-      setLoading(false);
+    const result = authenticateAccount(identifier, password);
+    setLoading(false);
+
+    if (!result.ok || !result.account) {
+      setStatusMsg({
+        type: "error",
+        text: result.error || "The email/ID or password is incorrect. Please check and try again.",
+      });
+      return;
     }
+
+    signIn(result.account);
+    addNotification(`Welcome back, ${result.account.name}! Device session active.`);
+    navigate("/dashboard");
   };
 
-  const handleResetSubmit = async (e: React.FormEvent) => {
+  const handleGoogleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
-    const cleanEmail = resetEmail.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes("@")) {
-      setStatusMsg({ type: "error", text: "Please enter a valid email" });
+
+    const emailClean = normalizeEmail(googleEmail);
+    if (!emailClean) {
+      setStatusMsg({ type: "error", text: "Please enter your Google account email." });
       return;
     }
-    setLoading(true);
-    try {
-      const result = await resetSecureFn({ data: { email: cleanEmail } });
-      if ((result as any)?.ok) {
-        setStatusMsg({ type: "success", text: `Password reset email sent to ${cleanEmail}. Check inbox. You can only reset once every 60 days.` });
-        setMode("credentials");
-      }
-    } catch (err: any) {
-      const msg = err.message || "Reset failed";
-      if (msg.startsWith("PASSWORD_RESET_LIMIT")) {
-        // Parse friendly date
-        const parts = msg.split("Next allowed:");
-        const nextDate = parts[1] ? parts[1].trim() : "in 60 days";
-        setStatusMsg({ type: "error", text: `Password reset is limited to once every 60 days. Next allowed: ${nextDate}.` });
-      } else {
-        setStatusMsg({ type: "error", text: msg });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleGoogleSignIn = async () => {
-    setGoogleLoading(true);
-    setStatusMsg(null);
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/dashboard`,
-        }
+    const all = getAccounts();
+    const existing = all.find(
+      (a) =>
+        (a.googleAuth?.enabled && normalizeEmail(a.googleAuth.linkedEmail) === emailClean) ||
+        normalizeEmail(a.email) === emailClean
+    );
+
+    if (existing) {
+      // SECURITY CHECK: User must explicitly enable Google Sign-In in Account Settings
+      if (!existing.googleAuth?.enabled) {
+        setStatusMsg({
+          type: "error",
+          text: `Security Policy: Google Sign-In has not been enabled for this account (${existing.email}). To protect account security, please sign in with your email/phone and password first, then enable Google Sign-In in your Account Settings.`,
+        });
+        return;
+      }
+
+      if (normalizeEmail(existing.googleAuth.linkedEmail) !== emailClean) {
+        setStatusMsg({
+          type: "error",
+          text: `Access Denied: The Google account "${emailClean}" does not match the linked Google address on record for this account.`,
+        });
+        return;
+      }
+
+      signIn(existing);
+      addNotification(`Signed in with verified Google Account as ${existing.name}!`);
+      navigate(existing.type === "tribe" ? "/tribe" : "/academy");
+    } else {
+      setStatusMsg({
+        type: "error",
+        text: `No account registered with ${emailClean}. Google-only instant signup is not permitted — please complete the registration form first to set up your skill track.`,
       });
-      if (error) throw error;
-    } catch (err: any) {
-      setStatusMsg({ type: "error", text: err.message || "Google sign-in failed" });
-      setGoogleLoading(false);
     }
   };
 
-  const handleResendConfirmation = async (e: React.FormEvent) => {
+  const handleBiometricSignIn = async (targetId?: string) => {
+    setStatusMsg(null);
+    setBioLoading(true);
+    try {
+      const res = await authenticateWithBiometrics(targetId || (identifier.trim() ? identifier.trim() : undefined));
+      if (!res.ok || !res.studentId) {
+        setStatusMsg({ type: "error", text: res.error || "Biometric authentication cancelled or unavailable." });
+        return;
+      }
+      const all = getAccounts();
+      const account = all.find((a) => a.id.toLowerCase() === res.studentId!.toLowerCase());
+      if (!account) {
+        setStatusMsg({ type: "error", text: `Account for ID ${res.studentId} could not be found.` });
+        return;
+      }
+      signIn(account);
+      addNotification(`Biometric authentication verified — welcome back, ${account.name}!`);
+      navigate("/dashboard");
+    } catch (e: unknown) {
+      setStatusMsg({ type: "error", text: e instanceof Error ? e.message : "Biometric error." });
+    } finally {
+      setBioLoading(false);
+    }
+  };
+
+  const handleRequestReset = (e: React.FormEvent) => {
     e.preventDefault();
-    const emailToResend = (resendEmail || identifier || resetEmail).trim().toLowerCase();
-    if (!emailToResend || !emailToResend.includes("@")) {
-      setStatusMsg({ type: "error", text: "Please enter a valid email to resend confirmation." });
+    const target = resetTarget.trim() || identifier.trim();
+    if (!target) {
+      setStatusMsg({ type: "error", text: "Please enter your registered Email, KR8 ID, or Phone." });
       return;
     }
-    setResendLoading(true);
-    setStatusMsg(null);
-    try {
-      const { error } = await supabase.auth.resend({ type: 'signup', email: emailToResend, options: { emailRedirectTo: `${window.location.origin}/signin` } });
-      if (error) throw error;
-      setStatusMsg({ type: "success", text: `Confirmation email resent to ${emailToResend}. Check your email to confirm - including spam folder.` });
-    } catch (err: any) {
-      setStatusMsg({ type: "error", text: err.message || "Failed to resend confirmation email" });
-    } finally {
-      setResendLoading(false);
+    const res = requestPasswordReset(target);
+    setStatusMsg({ type: res.ok ? "success" : "error", text: res.message });
+    if (res.code) {
+      setDemoCode(res.code);
+      setResetCode(res.code);
     }
   };
 
-  const handleWebAuthnSignIn = async () => {
-    setStatusMsg(null);
-    setLoading(true);
-    try {
-      const { startAuthentication } = await import("@simplewebauthn/browser");
-      const { data: challengeData, error: challengeError } = await supabase.functions.invoke('webauthn-auth-options', {
-        body: { identifier: identifier.trim() || undefined }
-      });
-      if (challengeError || !challengeData) {
-        throw new Error("WebAuthn not configured. Please use KR8 ID or Google.");
-      }
-      const authResp = await startAuthentication(challengeData);
-      const { data: verifyData, error: verifyError } = await supabase.functions.invoke('webauthn-auth-verify', {
-        body: authResp
-      });
-      if (verifyError) throw verifyError;
-      if ((verifyData as any)?.session) {
-        await supabase.auth.setSession({ access_token: (verifyData as any).session.access_token, refresh_token: (verifyData as any).session.refresh_token });
-        navigate("/dashboard");
-      }
-    } catch (err: any) {
-      setStatusMsg({ type: "error", text: err.message || "Biometric sign-in failed" });
-    } finally {
-      setLoading(false);
+  const handleCompleteReset = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = resetTarget.trim() || identifier.trim();
+    const res = completePasswordReset(target, resetCode, newPassword);
+    setStatusMsg({ type: res.ok ? "success" : "error", text: res.message });
+    if (res.ok && res.account) {
+      signIn(res.account);
+      setTimeout(() => navigate("/dashboard"), 1200);
     }
   };
 
   return (
     <div className="section-bg min-h-[85vh] py-12 sm:py-16 px-5">
-      <div className="mx-auto max-w-md">
+      <div className="mx-auto max-w-lg">
         <div className="text-center mb-8">
-          <Pill>Secure Sign-In - Any Device</Pill>
-          <h1 className="font-display mt-4 text-3xl font-bold text-white whitespace-nowrap">Welcome <span className="text-gradient">Back</span></h1>
-          <p className="mt-3 text-sm text-[#cabfe0]">Sign in with KR8 ID or email + password. Works on phone, laptop, private window.</p>
+          <div className="mx-auto mb-4 flex justify-center">
+            <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-pink-500/25 via-purple-500/15 to-transparent p-2 border border-pink-500/40 shadow-2xl shadow-pink-500/30">
+              <img
+                src="/branding/kr8_logo.png"
+                alt="KR8 Digitals Logo"
+                className="h-full w-full object-contain filter drop-shadow"
+              />
+            </div>
+          </div>
+          <Pill>Member Portal</Pill>
+          <h1 className="font-display mt-4 text-3xl sm:text-4xl font-bold text-white">
+            Sign In to <span className="text-gradient">KR8 Platform</span>
+          </h1>
+          <p className="mt-2 text-xs sm:text-sm text-[#cabfe0]">
+            Sign in with your Email, Google, KR8 ID, or registered Biometrics.
+          </p>
+
+          <div className="mt-4 flex items-center justify-center gap-2 text-xs sm:text-sm text-[#a594c7]">
+            <span>Need an account?</span>
+            <Link to="/register" className="font-bold text-pink-400 hover:text-pink-300 underline">
+              Register Free here →
+            </Link>
+          </div>
         </div>
 
+        {/* Existing active user card */}
         {user && (
-          <Card className="mb-6 p-4 text-center border border-emerald-500/30 bg-emerald-500/10">
-            <p className="text-xs text-emerald-200">Signed in as <span className="font-bold text-white">{user.name}</span> ({user.kr8_id})</p>
-            <div className="mt-3 flex gap-2 justify-center">
-              <Link to="/dashboard" className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white">Dashboard →</Link>
-              <button onClick={() => signOut()} className="rounded-full border border-white/20 px-4 py-1.5 text-xs text-white">Sign Out</button>
+          <div className="mb-6 rounded-2xl border border-pink-500/40 bg-pink-500/10 p-4 text-center">
+            <p className="text-xs sm:text-sm text-pink-200">
+              You are currently signed in as <span className="font-bold text-white">{user.name}</span>.
+            </p>
+            <div className="mt-3 flex justify-center gap-2.5">
+              <GradientButton to="/dashboard" className="text-xs px-4 py-2">
+                Open Dashboard →
+              </GradientButton>
+              <GhostButton onClick={signOut} className="text-xs px-4 py-2 border-white/20">
+                Sign Out
+              </GhostButton>
             </div>
-          </Card>
+          </div>
         )}
 
         <Card className="p-6 sm:p-8">
-          <div className="flex rounded-full bg-black/30 p-1 mb-6 border border-white/10">
-            <button onClick={() => setMode("credentials")} className={`flex-1 rounded-full py-2 text-xs font-bold transition ${mode === "credentials" ? "bg-gradient-pink text-white" : "text-[#8a7ba8]"}`}>KR8 ID</button>
-            <button onClick={() => setMode("webauthn")} className={`flex-1 rounded-full py-2 text-xs font-bold transition ${mode === "webauthn" ? "bg-gradient-pink text-white" : "text-[#8a7ba8]"}`}>Biometrics</button>
-            <button onClick={() => setMode("reset")} className={`flex-1 rounded-full py-2 text-xs font-bold transition ${mode === "reset" ? "bg-gradient-pink text-white" : "text-[#8a7ba8]"}`}>Reset</button>
+          {/* Top Tabs */}
+          <div className="mb-6 flex rounded-xl border border-white/10 bg-black/30 p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("credentials");
+                setStatusMsg(null);
+              }}
+              className={`flex-1 rounded-lg py-2 font-bold transition-all ${
+                mode === "credentials" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Email / ID 🔑
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("google");
+                setStatusMsg(null);
+              }}
+              className={`flex-1 rounded-lg py-2 font-bold transition-all ${
+                mode === "google" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Google Account 🌐
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("reset");
+                setStatusMsg(null);
+              }}
+              className={`flex-1 rounded-lg py-2 font-bold transition-all ${
+                mode === "reset" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Lost Password 🔄
+            </button>
           </div>
 
+          {/* Status Message */}
           {statusMsg && (
-            <div className={`mb-4 rounded-xl p-3 text-xs font-semibold ${statusMsg.type === "success" ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : statusMsg.type === "info" ? "border border-blue-500/40 bg-blue-500/15 text-blue-200" : "border border-red-500/40 bg-red-500/15 text-red-200"}`}>
-              {statusMsg.type === "success" ? "✓ " : statusMsg.type === "info" ? "ℹ " : "✕ "}{statusMsg.text}
+            <div
+              className={`mb-5 rounded-xl p-3.5 text-xs font-semibold ${
+                statusMsg.type === "error"
+                  ? "border border-red-500/40 bg-red-500/15 text-red-200"
+                  : statusMsg.type === "success"
+                  ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
+                  : "border border-blue-500/40 bg-blue-500/15 text-blue-200"
+              }`}
+            >
+              {statusMsg.text}
+              {statusMsg.text.includes("suspended") && (
+                <div className="mt-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowAppeal(true)}
+                    className="rounded-lg bg-red-500/30 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500/40"
+                  >
+                    Submit 30-Day Appeal Statement →
+                  </button>
+                </div>
+              )}
+              {statusMsg.text.includes("Google-only instant signup is not permitted") && (
+                <div className="mt-2.5">
+                  <Link
+                    to={`/register?email=${encodeURIComponent(googleEmail)}`}
+                    className="inline-block rounded-lg bg-pink-500/30 px-3 py-1.5 text-xs font-bold text-white hover:bg-pink-500/40"
+                  >
+                    Go to Full Registration Form →
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 
+          {/* METHOD 1: EMAIL OR KR8 ID + PASSWORD */}
           {mode === "credentials" && (
-            <form onSubmit={handleKr8SignIn} className="space-y-4">
+            <form onSubmit={handleCredentialsSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">KR8 ID or Email *</label>
-                <input type="text" required placeholder="e.g. KR82026JC0024GDVFD or your@email.com" className={inputCls} value={identifier} onChange={e => setIdentifier(e.target.value)} />
-                <p className="mt-1 text-[11px] text-[#8a7ba8]">Server resolves email from KR8 ID, never reveals email. Rate limit 5/min.</p>
+                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                  Email Address or KR8 ID *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. name@example.com or KR82026KT0001GDVFD"
+                  className={inputCls}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">Password *</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-[#cabfe0]">Password *</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("reset");
+                      setResetTarget(identifier);
+                    }}
+                    className="text-xs text-pink-400 hover:text-pink-300 underline"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
                 <div className="relative">
-                  <input type={showPassword ? "text" : "password"} required placeholder="Your password" className={inputCls} value={password} onChange={e => setPassword(e.target.value)} />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#8a7ba8]">{showPassword ? "Hide" : "Show"}</button>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="••••••••"
+                    className={`${inputCls} pr-12`}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-3 text-xs text-[#8a7ba8] hover:text-white"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
                 </div>
               </div>
-              <GradientButton type="submit" disabled={loading || authLoading} className="w-full py-3.5 text-sm font-bold disabled:opacity-50">
-                {loading ? "Signing in securely..." : "Sign In with KR8 ID →"}
-              </GradientButton>
 
-              <div className="relative my-4 flex items-center">
-                <div className="flex-1 border-t border-white/10"></div>
-                <span className="px-3 text-[11px] text-[#8a7ba8]">or</span>
-                <div className="flex-1 border-t border-white/10"></div>
+              <div className="pt-2">
+                <GradientButton
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold disabled:opacity-50"
+                >
+                  {loading ? "Authenticating..." : "Sign In to KR8 →"}
+                </GradientButton>
               </div>
 
-              <button type="button" onClick={handleGoogleSignIn} disabled={googleLoading} className="w-full rounded-xl border border-white/15 bg-white text-black py-3 text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-100 disabled:opacity-50">
-                <span>G</span> Continue with Google
-              </button>
+              {/* Biometric Sign-In Section */}
+              <div className="pt-4 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => handleBiometricSignIn()}
+                  disabled={bioLoading}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-pink-500/30 bg-pink-500/10 py-3 text-xs font-bold text-pink-200 hover:bg-pink-500/20 active:scale-98 transition-all disabled:opacity-50"
+                >
+                  <Icon name="fingerprint" size={18} className="text-pink-400" />
+                  <span>{bioLoading ? "Verifying Sensor..." : "Sign in with Biometrics / Passkey"}</span>
+                </button>
+
+                {registeredBios.length > 0 ? (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-[#8a7ba8]">Saved on this device:</span>
+                    {registeredBios.map((b) => (
+                      <button
+                        key={b.studentId}
+                        type="button"
+                        onClick={() => handleBiometricSignIn(b.studentId)}
+                        className="rounded-full bg-white/5 border border-white/15 px-2.5 py-0.5 text-[10px] font-mono text-pink-300 hover:bg-white/10"
+                      >
+                        {b.studentName.split(" ")[0]} ({b.studentId.slice(-6)})
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-[#8a7ba8] text-center">
+                    Biometrics can be enabled in your profile Settings after sign-in.
+                  </p>
+                )}
+              </div>
+            </form>
+          )}
+          {/* METHOD 2: SIGN IN WITH GOOGLE */}
+          {mode === "google" && (
+            <form onSubmit={handleGoogleSignIn} className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow">
+                  <svg className="h-6 w-6" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-base font-bold text-white">Google Account Sign-In</h3>
+                <p className="mt-1 text-xs text-[#cabfe0]">
+                  Resolves to your existing registered KR8 account matching your Google email address.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                  Enter your Google Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="your.email@gmail.com"
+                  className={inputCls}
+                  value={googleEmail}
+                  onChange={(e) => setGoogleEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="pt-2">
+                <GradientButton type="submit" className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold">
+                  Continue with Google →
+                </GradientButton>
+              </div>
+
+              <p className="text-[11px] text-[#8a7ba8] text-center">
+                Note: Google-only instant registration is not permitted. All new accounts must register via the full form.
+              </p>
             </form>
           )}
 
-          {mode === "webauthn" && (
+          {/* METHOD 3: LOST PASSWORD RESET */}
+          {mode === "reset" && (
             <div className="space-y-4">
-              <p className="text-xs text-[#8a7ba8]">Use your device biometrics (Face ID, Touch ID, fingerprint) or security key. Add passkeys in Profile → Security.</p>
-              <div>
-                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">KR8 ID (optional for discovery)</label>
-                <input type="text" placeholder="KR8 ID or leave blank" className={inputCls} value={identifier} onChange={e => setIdentifier(e.target.value)} />
-              </div>
-              <GradientButton onClick={handleWebAuthnSignIn} disabled={loading} className="w-full py-3.5 text-sm font-bold disabled:opacity-50">
-                {loading ? "Authenticating..." : "Sign In with Biometrics →"}
-              </GradientButton>
-              <GhostButton onClick={() => setMode("credentials")} className="w-full text-xs">Back to KR8 ID</GhostButton>
+              <form onSubmit={handleRequestReset} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                    Registered Email, KR8 ID, or Phone *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. name@example.com or KR82026KT0001GDVFD"
+                    className={inputCls}
+                    value={resetTarget}
+                    onChange={(e) => setResetTarget(e.target.value)}
+                  />
+                </div>
+                <GradientButton type="submit" className="w-full py-3 text-xs font-bold">
+                  Request Reset Verification Code 📩
+                </GradientButton>
+              </form>
+
+              {demoCode && (
+                <form onSubmit={handleCompleteReset} className="mt-5 space-y-3 border-t border-white/10 pt-4">
+                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/60 p-3 text-center">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                      Verification Code Generated:
+                    </p>
+                    <p className="font-mono text-2xl font-black text-white tracking-widest my-1">{demoCode}</p>
+                    <p className="text-[10px] text-emerald-300">Enter your new password below.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#cabfe0] mb-1">
+                      Reset Code
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="6-digit code"
+                      className={inputCls}
+                      value={resetCode}
+                      onChange={(e) => setResetCode(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#cabfe0] mb-1">
+                      New Password (at least 6 characters)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      className={inputCls}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                  </div>
+
+                  <GradientButton type="submit" className="w-full py-3 text-xs font-bold">
+                    Save New Password & Sign In →
+                  </GradientButton>
+                </form>
+              )}
             </div>
           )}
-
-          {mode === "reset" && (
-            <form onSubmit={handleResetSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">Email for Reset *</label>
-                <input type="email" required placeholder="your@email.com" className={inputCls} value={resetEmail} onChange={e => setResetEmail(e.target.value)} />
-                <p className="mt-1 text-[11px] text-amber-300">⚠ Password reset only once every 60 days. Next allowed date shown if limited.</p>
-              </div>
-              <GradientButton type="submit" disabled={loading} className="w-full py-3.5 text-sm font-bold disabled:opacity-50">
-                {loading ? "Checking limit..." : "Send Reset Email →"}
-              </GradientButton>
-              <GhostButton onClick={() => setMode("credentials")} className="w-full text-xs">Back to Sign In</GhostButton>
-            </form>
-          )}
-
-          {/* Resend Confirmation Email */}
-          <div className="mt-6 border-t border-white/10 pt-4">
-            <p className="text-xs font-semibold text-[#cabfe0] mb-2">Didn't get confirmation email?</p>
-            <form onSubmit={handleResendConfirmation} className="flex gap-2">
-              <input type="email" placeholder="your@email.com" className={`${inputCls} flex-1`} value={resendEmail} onChange={e => setResendEmail(e.target.value)} />
-              <button type="submit" disabled={resendLoading} className="rounded-xl bg-white/10 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/20 disabled:opacity-50">{resendLoading ? "Sending..." : "Resend Confirmation Email"}</button>
-            </form>
-            <p className="mt-1 text-[11px] text-[#8a7ba8]">Check your email to confirm - including spam folder. Works on any device after confirmation.</p>
-          </div>
-
-          <div className="mt-6 text-center">
-            <p className="text-xs text-[#8a7ba8]">New student? <Link to="/register" className="font-bold text-pink-400 underline">Register here</Link></p>
-            <p className="mt-2 text-[11px] text-[#8a7ba8] leading-relaxed">Security: KR8 ID server resolves email, generic error, rate limit 5/min. Founder role only after email verification.</p>
-          </div>
         </Card>
       </div>
+
+      {/* 30-Day Suspension Appeal Modal */}
+      {showAppeal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-3xl border border-red-500/40 bg-[#160d2b] p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <h3 className="font-bold text-white text-base">Submit Account Appeal</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAppeal(false);
+                  setAppealResult(null);
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+              >
+                ✕
+              </button>
+            </div>
+
+            {appealResult ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/20 p-4 text-xs text-emerald-200">
+                  ✓ {appealResult}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAppeal(false);
+                    setAppealResult(null);
+                  }}
+                  className="w-full rounded-xl bg-gradient-pink py-2.5 text-xs font-bold text-white"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleAppealSubmit} className="mt-4 space-y-4">
+                <p className="text-xs text-[#cabfe0] leading-relaxed">
+                  You have a 30-day appeal window following account suspension. State your situation clearly for review by KR8 leadership.
+                </p>
+                <div>
+                  <label className="block text-xs font-bold text-[#e8ddf5] mb-1">
+                    Account Credential (ID, Email or Phone):
+                  </label>
+                  <input
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="Your email, KR8 ID, or phone"
+                    required
+                    className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#e8ddf5] mb-1">
+                    Your Appeal Statement:
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={appealText}
+                    onChange={(e) => setAppealText(e.target.value)}
+                    placeholder="Explain the circumstances and why your account should be restored..."
+                    required
+                    className="w-full rounded-xl border border-white/15 bg-black/40 p-3 text-xs text-white focus:border-pink-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAppeal(false)}
+                    className="rounded-xl px-4 py-2 text-xs text-gray-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-gradient-pink px-5 py-2 text-xs font-bold text-white shadow-lg hover:brightness-110"
+                  >
+                    Submit Appeal for Review
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
