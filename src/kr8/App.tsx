@@ -29,6 +29,8 @@ import MessagesPage from "./pages/MessagesPage";
 import MindsetShiftPage from "./pages/MindsetShiftPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import GoRedirect from "./pages/GoRedirect";
+import CheckEmailPage from "./pages/CheckEmailPage";
+import EmailConfirmedPage from "./pages/EmailConfirmedPage";
 
 export default function App() {
   useEffect(() => {
@@ -45,6 +47,9 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/waitlist" element={<WaitlistPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/register/check-email" element={<CheckEmailPage />} />
+              <Route path="/auth/confirmed" element={<EmailConfirmedPage />} />
+              <Route path="/welcome/confirmed" element={<EmailConfirmedPage />} />
               <Route path="/signup" element={<RegisterPage />} />
               <Route path="/signin" element={<SignInPage />} />
               <Route path="/login" element={<SignInPage />} />

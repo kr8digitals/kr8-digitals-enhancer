@@ -105,8 +105,8 @@ export const signInWithKr8Id = createServerFn({ method: "POST" })
       // Then return session tokens
       
       const { createClient } = await import("@supabase/supabase-js");
-      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+      const supabaseUrl = process.env['SUPABASE_URL'] || process.env['VITE_SUPABASE_URL'];
+      const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'] || process.env['VITE_SUPABASE_ANON_KEY'] || process.env['SUPABASE_PUBLISHABLE_KEY'] || process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
       
       if (!supabaseUrl || !supabaseAnonKey) {
         throw new Error("Server not configured");
@@ -183,7 +183,7 @@ export const requestPasswordResetSecure = createServerFn({ method: "POST" })
         console.warn('password_reset_status error (may not exist yet):', statusError.message);
       } else if (statusData && statusData.length > 0) {
         const status = statusData[0];
-        if (!status.allowed) {
+        if (status && !status.allowed) {
           const nextDate = status.next_allowed_at ? new Date(status.next_allowed_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'in 60 days';
           throw new Error(`PASSWORD_RESET_LIMIT: Password reset can only be used once every 60 days. Next allowed: ${nextDate}`);
         }
@@ -207,9 +207,9 @@ export const requestPasswordResetSecure = createServerFn({ method: "POST" })
 
       // Call Supabase recovery
       const { createClient } = await import("@supabase/supabase-js");
-      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-      const siteUrl = process.env.VITE_SITE_URL || process.env.SITE_URL || 'https://kr8-website-enhancer.vercel.app';
+      const supabaseUrl = process.env['SUPABASE_URL'] || process.env['VITE_SUPABASE_URL'];
+      const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'] || process.env['VITE_SUPABASE_ANON_KEY'] || process.env['SUPABASE_PUBLISHABLE_KEY'] || process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
+      const siteUrl = process.env['VITE_SITE_URL'] || process.env['SITE_URL'] || 'https://kr8-website-enhancer.vercel.app';
 
       if (!supabaseUrl || !supabaseAnonKey) {
         throw new Error("Server not configured");
