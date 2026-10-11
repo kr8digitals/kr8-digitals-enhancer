@@ -1,138 +1,180 @@
 // @ts-nocheck
 import { useState, useRef, useEffect } from "react";
-import { Link } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
-import { Pill, GradientButton } from "../components/ui";
+import { kr8AiRespond, getSkillName } from "../data/store";
+import { Pill, Card, GradientButton } from "../components/ui";
 import Icon from "../components/Icon";
 import { useSeo } from "../lib/useSeo";
 
-type Msg = { role: "user" | "ai"; text: string };
-
-const prompts = [
-  "Suggest a 30-day roadmap for graphic design",
-  "Review my portfolio approach",
-  "What tools should a video editor learn?",
-  "How do I get my first client?",
+const QUICK_TOPICS = [
+  "What is KR8 Digitals and how does it work?",
+  "Give me a consistency & accountability check-in",
+  "Share the official WhatsApp learning group links",
+  "How are Leaderboard XP points calculated?",
+  "Show me your live Agency Website Development clients",
+  "Tell me about City Fashion Store Complete Branding",
+  "How do I verify a KR8 ID or Certificate?",
+  "Who are the Founder and Co-Founders of KR8 Digitals?",
 ];
-
-function reply(q: string): string {
-  const l = q.toLowerCase();
-  if (l.includes("roadmap"))
-    return "Here's a solid 30-day roadmap:\n\nWeek 1 — Fundamentals: learn the core tools and principles.\nWeek 2 — Guided practice: recreate 3 real-world pieces.\nWeek 3 — Original work: build 2 portfolio projects.\nWeek 4 — Ship & share: post your work in the Tribe, get feedback, and apply for your first gig.\n\nConsistency beats intensity — 1 focused hour a day wins.";
-  if (l.includes("client"))
-    return "Getting your first client:\n1. Package 3 strong portfolio pieces.\n2. Offer a small, clear service (not 'everything').\n3. Post it in the KR8 Tribe and ask for referrals.\n4. Reach out to 5 local businesses a day.\n5. Over-deliver on the first job — referrals compound.";
-  if (l.includes("tool"))
-    return "For video editing, start with DaVinci Resolve (free & powerful) or CapCut for fast social edits. Learn: cutting to rhythm, color correction, audio leveling, and simple motion graphics. Master one deeply before adding more.";
-  if (l.includes("portfolio"))
-    return "A strong portfolio shows outcomes, not just visuals. For each piece include: the problem, your approach, and the result. 4 great projects beat 20 average ones. Lead with your best work.";
-  return "Great question! Break it into the smallest next step you can take today, then act on it. Want me to turn this into a step-by-step plan for your skill track? Tell me which skill you're on and your current level.";
-}
 
 export default function AIPage() {
   useSeo({
-    title: "KR8 AI — Your Always-On Creative Mentor | KR8 Digitals",
+    title: "KR8 AI — Ecosystem Companion & Student Accountability Coach | KR8 Digitals",
     description:
-      "KR8 AI is your always-on creative mentor — ask anything about skills, projects, roadmaps, and tools, straight inside the KR8 Digitals platform.",
+      "Chat with KR8 AI — your 24/7 companion for tuition-free digital skill tracks, daily consistency & accountability coaching, ID verification, leaderboard rankings, and Agency strategy.",
     path: "/ai",
   });
+
   const { student } = useAuth();
-  const LIMIT = 3;
-  const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "ai", text: `Hi${student ? " " + student.name.split(" ")[0] : ""}! I'm KR8 AI — your always-on creative mentor. Ask me anything about skills, projects, roadmaps or tools.` },
+  const [msgs, setMsgs] = useState<{ role: "user" | "ai"; text: string }[]>(() => [
+    {
+      role: "ai",
+      text:
+        `👋 Welcome${student?.name ? `, **${student.name.split(" ")[0]}**` : ""}! I am **KR8 AI**, your full-ecosystem companion and accountability coach.\n\n` +
+        `I know everything across **KR8 Academy**, **KR8 Tribe**, **KR8 Agency**, **Live Credential Verification**, and **Leaderboard Rankings** — and I'm here to help you stay consistent, ship your weekly projects, and answer any question you have.`,
+    },
   ]);
   const [input, setInput] = useState("");
-  const [used, setUsed] = useState(0);
+  const [typing, setTyping] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs]);
+  }, [msgs, typing]);
 
-  const locked = !student && used >= LIMIT;
-
-  const send = (text: string) => {
-    if (!text.trim() || locked) return;
-    setMsgs((m) => [...m, { role: "user", text }]);
-    setInput("");
-    if (!student) setUsed((u) => u + 1);
+  const send = (q?: string) => {
+    const clean = (q ?? input).trim();
+    if (!clean) return;
+    setMsgs((prev) => [...prev, { role: "user", text: clean }]);
+    if (!q) setInput("");
+    setTyping(true);
     setTimeout(() => {
-      setMsgs((m) => [...m, { role: "ai", text: reply(text) }]);
-    }, 500);
+      const reply = kr8AiRespond(clean, student, "/ai");
+      setMsgs((prev) => [...prev, { role: "ai", text: reply }]);
+      setTyping(false);
+    }, 320);
+  };
+
+  const renderFormatted = (text: string) => {
+    return text.split("\n").map((line, i) => {
+      const parts = line.split(/(\*\*.*?\*\*|https?:\/\/[^\s)]+)/g);
+      return (
+        <span key={i} className="block min-h-[1.2em]">
+          {parts.map((part, j) => {
+            if (part.startsWith("**") && part.endsWith("**")) {
+              return (
+                <strong key={j} className="font-bold text-white">
+                  {part.slice(2, -2)}
+                </strong>
+              );
+            }
+            if (/^https?:\/\//.test(part)) {
+              return (
+                <a
+                  key={j}
+                  href={part}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-pink-300 underline underline-offset-2 hover:text-pink-200 break-all"
+                >
+                  {part}
+                </a>
+              );
+            }
+            return <span key={j}>{part}</span>;
+          })}
+        </span>
+      );
+    });
   };
 
   return (
-    <div className="section-bg min-h-screen">
-      <div className="mx-auto max-w-4xl px-5 py-14">
+    <div className="section-bg min-h-screen py-14">
+      <div className="mx-auto max-w-4xl px-5">
         <div className="text-center">
-          <Pill>Always-On Creative Copilot</Pill>
-          <h1 className="font-display mt-5 text-4xl text-white sm:text-6xl font-bold">
-            Your 24/7 Creative Mentor. <span className="text-gradient">Zero Judgment.</span>
+          <Pill>KR8 AI · Ecosystem Companion & Accountability Coach</Pill>
+          <h1 className="font-display mt-4 text-4xl text-white sm:text-5xl font-bold">
+            Ask <span className="text-gradient">KR8 AI</span> Anything
           </h1>
-          <p className="mx-auto mt-4 max-w-xl text-base text-[#cabfe0] leading-relaxed">
-            Stuck on client pricing? Need a critique on your visual balance? Brainstorming high-retention video hooks? Ask KR8 AI for battle-tested advice calibrated for real market demand.
+          <p className="mt-3 text-sm sm:text-base text-[#b8aecf] max-w-2xl mx-auto">
+            Your 24/7 companion for Academy curriculum, daily consistency habits, WhatsApp class groups, Leaderboard XP rules, ID verification, and Agency services.
           </p>
         </div>
 
-        <div className="mt-10 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03]">
-          <div className="flex items-center gap-3 border-b border-white/10 bg-[#12001f] px-5 py-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-pink text-white"><Icon name="bot" size={18} /></span>
-            <div>
-              <p className="text-sm font-bold text-white">KR8 AI</p>
-              <p className="text-[11px] text-green-400">● Online{!student && ` · ${LIMIT - used} free messages left`}</p>
+        <Card className="mt-8 p-0 overflow-hidden border-pink-500/30 shadow-2xl">
+          <div className="border-b border-white/10 bg-[#150226] px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-pink text-white">
+                <Icon name="bot" size={20} />
+              </div>
+              <div>
+                <h2 className="font-bold text-white text-sm sm:text-base">
+                  KR8 AI Intelligence Engine
+                </h2>
+                <p className="text-xs text-pink-300">
+                  {student
+                    ? `Signed in as ${student.name} (${getSkillName(student.skill)}) · ${student.points || 0} XP`
+                    : "Visitor & Student Companion · Connected to KR8 Live Knowledge"}
+                </p>
+              </div>
             </div>
+            <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-3 py-1 text-xs font-bold text-emerald-300">
+              ● Active Everywhere
+            </span>
           </div>
 
-          <div className="h-[380px] space-y-4 overflow-y-auto p-5">
+          <div className="h-[460px] overflow-y-auto p-6 space-y-4 bg-[#0b0014]/60">
             {msgs.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] whitespace-pre-line rounded-2xl px-4 py-3 text-sm ${m.role === "user" ? "bg-gradient-pink text-white" : "border border-white/10 bg-black/30 text-[#cabfe0]"}`}>
-                  {m.text}
-                </div>
+              <div
+                key={i}
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[85%] ${
+                  m.role === "user"
+                    ? "ml-auto bg-gradient-pink text-white shadow-lg"
+                    : "mr-auto bg-white/[0.05] border border-white/10 text-[#dfd6f2]"
+                }`}
+              >
+                {renderFormatted(m.text)}
               </div>
             ))}
-            {locked && (
-              <div className="rounded-2xl border border-pink-400/40 bg-pink-500/10 p-5 text-center">
-                <p className="text-sm text-white">You've used your 3 free messages.</p>
-                <p className="mt-1 text-xs text-[#b8aecf]">Register free for unlimited access and saved history.</p>
-                <div className="mt-4"><GradientButton to="/academy">Join for Free →</GradientButton></div>
+            {typing && (
+              <div className="mr-auto rounded-2xl bg-white/[0.05] border border-white/10 px-4 py-3 text-xs text-pink-300">
+                KR8 AI is preparing your response...
               </div>
             )}
             <div ref={endRef} />
           </div>
 
-          <div className="border-t border-white/10 p-4">
-            <div className="mb-3 flex flex-wrap gap-2">
-              {prompts.map((p) => (
-                <button key={p} onClick={() => send(p)} disabled={locked} className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-[#b8aecf] hover:border-pink-400/50 disabled:opacity-40">
+          <div className="border-t border-white/10 bg-[#120021] p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {QUICK_TOPICS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => send(p)}
+                  className="rounded-full bg-white/[0.05] border border-white/10 px-3 py-1.5 text-xs text-[#cabfe0] hover:border-pink-400/50 hover:text-white transition cursor-pointer"
+                >
                   {p}
                 </button>
               ))}
             </div>
-            <div className="flex gap-2">
-              <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-white/15 text-lg text-[#b8aecf]">
-                <Icon name="paperclip" size={17} /><input type="file" className="hidden" />
-              </label>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                send();
+              }}
+              className="flex gap-2.5"
+            >
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send(input)}
-                disabled={locked}
-                placeholder={locked ? "Register to continue…" : "Ask KR8 AI anything…"}
-                className="flex-1 rounded-xl border border-white/15 bg-black/20 px-4 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none disabled:opacity-40"
+                placeholder="Ask anything about courses, consistency, WhatsApp links, verification, or Agency..."
+                className="flex-1 rounded-full border border-white/15 bg-black/40 px-5 py-3 text-sm text-white placeholder:text-[#7a6b94] focus:border-pink-400 focus:outline-none"
               />
-              <button onClick={() => send(input)} disabled={locked} className="rounded-xl bg-gradient-pink px-5 text-sm font-bold text-white disabled:opacity-40">Send</button>
-            </div>
-            {student && (
-              <button onClick={() => setMsgs(msgs.slice(0, 1))} className="mt-3 text-xs text-[#8a7ba8] hover:text-pink-400">Clear conversation history</button>
-            )}
+              <GradientButton type="submit">Send →</GradientButton>
+            </form>
           </div>
-        </div>
-
-        {!student && (
-          <p className="mt-6 text-center text-xs text-[#8a7ba8]">
-            Signed-in accounts get unlimited access & saved history. <Link to="/register" className="text-pink-400 font-bold hover:underline">Register free →</Link>
-          </p>
-        )}
+        </Card>
       </div>
     </div>
   );

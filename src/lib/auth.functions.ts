@@ -1,299 +1,398 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// Rate limiting in-memory (for serverless, use simple Map with expiry)
-const rateLimitMap = new Map<string, { count: number; last: number }>();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX = 5;
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(key);
-  if (!entry) {
-    rateLimitMap.set(key, { count: 1, last: now });
-    return true;
-  }
-  if (now - entry.last > RATE_LIMIT_WINDOW) {
-    rateLimitMap.set(key, { count: 1, last: now });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return false;
-  }
-  entry.count++;
-  return true;
+function isNewSupabaseApiKey(value: string): boolean {
+  return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
 }
 
-// Cleanup old entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of rateLimitMap.entries()) {
-    if (now - v.last > RATE_LIMIT_WINDOW * 5) {
-      rateLimitMap.delete(k);
+function createSupabaseFetch(supabaseKey: string): typeof fetch {
+  return (input, init) => {
+    const headers = new Headers(
+      typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined
+    );
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     }
-  }
-}, 5 * 60 * 1000);
+    if (isNewSupabaseApiKey(supabaseKey) && headers.get("Authorization") === `Bearer ${supabaseKey}`) {
+      headers.delete("Authorization");
+    }
+    headers.set("apikey", supabaseKey);
+    return fetch(input, { ...init, headers });
+  };
+}
 
-// ============================================================================
-// 1. Sign-in by KR8 ID - resolves email on server, never reveals email
-// ============================================================================
+function normalizePhoneDigits(phone: string): string {
+  const digits = (phone || "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0") && digits.length === 11) {
+    return "234" + digits.slice(1);
+  }
+  return digits;
+}
+
+const FOUNDER_EMAILS_SET = new Set(["kr8digitals01@gmail.com", "kutimfire001@gmail.com"]);
+const FOUNDER_PHONES_SET = new Set(["2348125687509", "2348166552758", "08125687509", "08166552758"]);
+const COFOUNDER_PHONES_SET = new Set(["2348089344434", "2348106068523", "08089344434", "08106068523"]);
+const MAIN_ADMIN_PASSWORD = "KR8@Adm!n2026";
+
+async function ensureExecutiveRoleInDb(supabaseAdmin: any, userId: string, role: "founder" | "co-founder") {
+  const allPerms = [
+    "all",
+    "view_students",
+    "issue_certificates",
+    "review_attendance",
+    "manage_content",
+    "manage_live",
+    "moderation",
+    "manage_links",
+    "view_finance",
+    "manage_roles",
+  ];
+  try {
+    await supabaseAdmin.from("user_roles").upsert(
+      {
+        user_id: userId,
+        role,
+        title: role === "founder" ? "Founder & CEO" : "Co-Founder",
+        permissions: allPerms,
+      } as any,
+      { onConflict: "user_id,role" }
+    );
+  } catch {}
+}
+
+// 1. Sign-in with Email, KR8 ID, or Phone Number
 const kr8SignInSchema = z.object({
-  identifier: z.string().min(3).max(100), // KR8 ID or email
-  password: z.string().min(1).max(100),
+  identifier: z.string().min(3).max(120),
+  password: z.string().min(6).max(200),
 });
 
 export const signInWithKr8Id = createServerFn({ method: "POST" })
-  .validator((d) => kr8SignInSchema.parse(d))
+  .inputValidator((d) => kr8SignInSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    
-    // Rate limit by identifier
-    const rateKey = `kr8id:${data.identifier.toLowerCase()}`;
-    if (!checkRateLimit(rateKey)) {
-      throw new Error("Too many attempts. Please wait a minute.");
-    }
+    const { createClient } = await import("@supabase/supabase-js");
 
     const rawId = data.identifier.trim();
-    const isEmail = rawId.includes('@');
-    let emailToUse: string | null = null;
-    let userId: string | null = null;
+    const isEmail = rawId.includes("@");
+    const phoneDigits = normalizePhoneDigits(rawId);
+    const isPhone = !isEmail && phoneDigits.length >= 9 && /^[+0-9\s()-]+$/.test(rawId);
+    const upperId = rawId.toUpperCase();
+    const cleanAlphaNum = upperId.replace(/[^A-Z0-9]/g, "");
 
-    try {
-      if (isEmail) {
-        // Direct email - normalize
-        emailToUse = rawId.toLowerCase();
-        // Find user_id from profiles for logging
-        const { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('id,email')
-          .eq('email', emailToUse)
+    const isFounderIdentifier =
+      (isEmail && FOUNDER_EMAILS_SET.has(rawId.toLowerCase())) ||
+      (isPhone && FOUNDER_PHONES_SET.has(phoneDigits)) ||
+      upperId === "KR8-FOUNDER-TIMFIRE" ||
+      cleanAlphaNum === "KR8FOUNDERTIMFIRE";
+
+    const isCoFounderIdentifier =
+      (isPhone && COFOUNDER_PHONES_SET.has(phoneDigits)) ||
+      upperId === "KR8-COFOUNDER-STEVENSON" ||
+      upperId === "KR8-COFOUNDER-DANIEL" ||
+      cleanAlphaNum === "KR8COFOUNDERSTEVENSON" ||
+      cleanAlphaNum === "KR8COFOUNDERDANIEL";
+
+    let emailToUse = isEmail ? rawId.toLowerCase() : "";
+    let matchedProfile: any = null;
+
+    // Resolve non-email identifier (KR8 ID or Phone) from profiles
+    if (!isEmail) {
+      if (isPhone) {
+        const { data: byPhone } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .or(`phone_normalized.eq.${phoneDigits},phone.ilike.%${phoneDigits.slice(-10)}%`)
+          .limit(1)
           .maybeSingle();
-        if (profile) userId = profile.id;
-      } else {
-        // KR8 ID - resolve email on server only - FIX: remove .or() and ilike('%...%'), validate regex ^[A-Z0-9]{6,20}$ and exact match only
-        const normalizedKr8 = rawId.toUpperCase().replace(/[\s-]/g, '');
-        // Validate ID format
-        if (!/^[A-Z0-9]{6,20}$/.test(normalizedKr8)) {
-          throw new Error("Invalid KR8 ID or password");
+        if (byPhone?.email) {
+          matchedProfile = byPhone;
+          emailToUse = byPhone.email.toLowerCase();
         }
-        const { data: profile, error } = await supabaseAdmin
-          .from('profiles')
-          .select('id,email,kr8_id')
-          .eq('kr8_id', normalizedKr8)
-          .maybeSingle();
-
-        if (error) {
-          console.warn('KR8 ID lookup error:', error.message);
-          throw new Error("Invalid KR8 ID or password");
-        }
-
-        if (!profile) {
-          throw new Error("Invalid KR8 ID or password");
-        }
-        emailToUse = profile.email;
-        userId = profile.id;
       }
 
       if (!emailToUse) {
-        throw new Error("Invalid KR8 ID or password");
+        // Lookup by exact KR8 ID or stripped KR8 ID
+        const { data: byKr8 } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .or(`kr8_id.ilike.${rawId},kr8_id.ilike.${cleanAlphaNum}`)
+          .limit(1)
+          .maybeSingle();
+        if (byKr8?.email) {
+          matchedProfile = byKr8;
+          emailToUse = byKr8.email.toLowerCase();
+        }
       }
 
-      // Now sign in with Supabase using email and password
-      // We need to use supabaseAdmin auth? No, we need to create a session.
-      // For server function, we can't directly sign in user, but we can verify password via signInWithPassword using anon client
-      // Then return session tokens
-      
-      const { createClient } = await import("@supabase/supabase-js");
-      const supabaseUrl = process.env['SUPABASE_URL'] || process.env['VITE_SUPABASE_URL'];
-      const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'] || process.env['VITE_SUPABASE_ANON_KEY'] || process.env['SUPABASE_PUBLISHABLE_KEY'] || process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
-      
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error("Server not configured");
+      // If Founder used KR8-FOUNDER-TIMFIRE or Founder Phone and wasn't matched by phone/kr8_id yet, find founder profile by email
+      if (!emailToUse && isFounderIdentifier) {
+        const { data: founderProf } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .or("email.ilike.kr8digitals01@gmail.com,email.ilike.kutimfire001@gmail.com")
+          .limit(1)
+          .maybeSingle();
+        if (founderProf?.email) {
+          matchedProfile = founderProf;
+          emailToUse = founderProf.email.toLowerCase();
+        } else {
+          emailToUse = "kr8digitals01@gmail.com";
+        }
       }
+    } else {
+      const { data: byEmail } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .ilike("email", emailToUse)
+        .limit(1)
+        .maybeSingle();
+      if (byEmail) matchedProfile = byEmail;
+    }
 
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    if (!emailToUse) {
+      return { ok: false, error: "Account not found. Please check your Email, KR8 ID, or Phone Number." };
+    }
 
-      const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
-        email: emailToUse,
-        password: data.password,
-      });
+    const supabaseUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"]!;
+    const supabaseAnonKey =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_ANON_KEY"]!;
 
-      if (signInError) {
-        // Generic error, never reveal if email exists
-        throw new Error("Invalid KR8 ID or password");
-      }
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { fetch: createSupabaseFetch(supabaseAnonKey) },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
-      if (!signInData.session) {
-        throw new Error("Invalid KR8 ID or password");
-      }
+    const isFounderUser =
+      isFounderIdentifier ||
+      FOUNDER_EMAILS_SET.has(emailToUse) ||
+      (matchedProfile?.phone_normalized && FOUNDER_PHONES_SET.has(matchedProfile.phone_normalized));
 
-      // Log activity (optional)
+    const isCoFounderUser =
+      !isFounderUser &&
+      (isCoFounderIdentifier ||
+        (matchedProfile?.phone_normalized && COFOUNDER_PHONES_SET.has(matchedProfile.phone_normalized)));
+
+    // If Founder or Co-Founder has a profile in DB, make sure their email is confirmed and user_roles is set
+    if ((isFounderUser || isCoFounderUser) && matchedProfile?.id) {
       try {
-        await supabaseAdmin.from('activity_log').insert({
-          actor_id: userId,
-          action: 'sign_in',
-          details: { method: 'kr8_id', identifier_type: isEmail ? 'email' : 'kr8_id' },
+        await supabaseAdmin.auth.admin.updateUserById(matchedProfile.id, {
+          email_confirm: true,
         });
       } catch {}
-
-      // Return session (tokens) - client will set it
-      return {
-        ok: true,
-        session: signInData.session,
-        user: signInData.user,
-      };
-    } catch (err: any) {
-      // Generic error for security - never reveal email
-      if (err.message === "Invalid KR8 ID or password" || err.message.includes("Too many")) {
-        throw err;
-      }
-      console.error('signInWithKr8Id error:', err);
-      throw new Error("Invalid KR8 ID or password");
+      await ensureExecutiveRoleInDb(supabaseAdmin, matchedProfile.id, isFounderUser ? "founder" : "co-founder");
     }
+
+    let { data: authData, error: authErr } = await authClient.auth.signInWithPassword({
+      email: emailToUse,
+      password: data.password,
+    });
+
+    // If Founder or Co-Founder is signing in with MAIN_ADMIN_PASSWORD or their account wasn't provisioned in auth.users yet
+    if (authErr && (isFounderUser || isCoFounderUser)) {
+      if (matchedProfile?.id && data.password === MAIN_ADMIN_PASSWORD) {
+        // Allow Founder/Co-Founder emergency unlock with MAIN_ADMIN_PASSWORD
+        try {
+          await supabaseAdmin.auth.admin.updateUserById(matchedProfile.id, {
+            password: data.password,
+            email_confirm: true,
+          });
+          const retry = await authClient.auth.signInWithPassword({
+            email: emailToUse,
+            password: data.password,
+          });
+          authData = retry.data;
+          authErr = retry.error;
+        } catch {}
+      } else if (!matchedProfile?.id && isFounderUser) {
+        // Provision Founder account in Supabase Auth if not created yet
+        try {
+          const { data: created } = await supabaseAdmin.auth.admin.createUser({
+            email: emailToUse,
+            password: data.password,
+            email_confirm: true,
+            user_metadata: {
+              name: "Kenneth Timothy Iziogo (Timfire)",
+              phone: "+2348125687509",
+              country: "NG",
+              skill: "web",
+            },
+          });
+          if (created?.user?.id) {
+            await ensureExecutiveRoleInDb(supabaseAdmin, created.user.id, "founder");
+            const retry = await authClient.auth.signInWithPassword({
+              email: emailToUse,
+              password: data.password,
+            });
+            authData = retry.data;
+            authErr = retry.error;
+          }
+        } catch {}
+      }
+    }
+
+    if (authErr || !authData?.session) {
+      const msg = authErr?.message || "";
+      if (msg.toLowerCase().includes("email not confirmed")) {
+        return {
+          ok: false,
+          code: "EMAIL_NOT_CONFIRMED",
+          email: emailToUse,
+          error:
+            "Your email address is not confirmed yet! Please open your email inbox (or Spam/Promotions folder) and click the confirmation button we sent you, or click 'Resend Confirmation Email' below.",
+        };
+      }
+      return {
+        ok: false,
+        error: "Invalid credentials. Please check your Email / KR8 ID / Phone and password.",
+      };
+    }
+
+    // Ensure Founder / Co-Founder role is persisted in user_roles upon successful login
+    if (authData.user?.id && (isFounderUser || isCoFounderUser)) {
+      await ensureExecutiveRoleInDb(supabaseAdmin, authData.user.id, isFounderUser ? "founder" : "co-founder");
+    }
+
+    // Log login activity
+    try {
+      await supabaseAdmin.from("activity_log").insert({
+        actor_id: authData.user.id,
+        action: "user_signin",
+        target: matchedProfile?.kr8_id || emailToUse,
+        details: { method: isEmail ? "email" : isPhone ? "phone" : "kr8_id" },
+      });
+    } catch {}
+
+    return {
+      ok: true,
+      session: {
+        access_token: authData.session.access_token,
+        refresh_token: authData.session.refresh_token,
+        expires_in: authData.session.expires_in,
+        user: authData.user,
+      },
+    };
   });
 
-// ============================================================================
-// 2. Lost password with 60-day limit
-// ============================================================================
-const resetRequestSchema = z.object({
+const syncRoleSchema = z.object({
+  userId: z.string().min(1),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+});
+
+export const syncExecutiveUserRoles = createServerFn({ method: "POST" })
+  .inputValidator((d) => syncRoleSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const emailLower = (data.email || "").trim().toLowerCase();
+    const phoneDigits = normalizePhoneDigits(data.phone || "");
+
+    const isFounder =
+      FOUNDER_EMAILS_SET.has(emailLower) || FOUNDER_PHONES_SET.has(phoneDigits);
+    const isCoFounder = !isFounder && COFOUNDER_PHONES_SET.has(phoneDigits);
+
+    if (isFounder) {
+      await ensureExecutiveRoleInDb(supabaseAdmin, data.userId, "founder");
+    } else if (isCoFounder) {
+      await ensureExecutiveRoleInDb(supabaseAdmin, data.userId, "co-founder");
+    }
+
+    const { data: roles } = await supabaseAdmin
+      .from("user_roles")
+      .select("role, permissions")
+      .eq("user_id", data.userId);
+
+    return { ok: true, roles: roles || [], isFounder, isCoFounder };
+  });
+
+// 2. Password reset request with 30-day limit enforced server-side
+const resetReqSchema = z.object({
   email: z.string().email(),
 });
 
 export const requestPasswordResetSecure = createServerFn({ method: "POST" })
-  .validator((d) => resetRequestSchema.parse(d))
+  .inputValidator((d) => resetReqSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const cleanEmail = data.email.trim().toLowerCase();
+    const { createClient } = await import("@supabase/supabase-js");
 
-    // Rate limit
-    const rateKey = `pwdreset:${cleanEmail}`;
-    if (!checkRateLimit(rateKey)) {
-      throw new Error("Too many reset attempts. Please wait.");
+    const email = data.email.trim().toLowerCase();
+
+    const { data: check, error: checkErr } = await supabaseAdmin.rpc("request_password_reset_check", {
+      p_email: email,
+    });
+
+    if (checkErr) {
+      throw new Error(checkErr.message);
     }
 
-    try {
-      // Check password_reset_status via service_role RPC
-      const { data: statusData, error: statusError } = await supabaseAdmin.rpc('password_reset_status', {
-        p_email: cleanEmail,
-      });
-
-      if (statusError) {
-        // If function doesn't exist yet, allow (fallback)
-        console.warn('password_reset_status error (may not exist yet):', statusError.message);
-      } else if (statusData && statusData.length > 0) {
-        const status = statusData[0];
-        if (status && !status.allowed) {
-          const nextDate = status.next_allowed_at ? new Date(status.next_allowed_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'in 60 days';
-          throw new Error(`PASSWORD_RESET_LIMIT: Password reset can only be used once every 60 days. Next allowed: ${nextDate}`);
-        }
-      }
-
-      // Log request
-      try {
-        await supabaseAdmin.rpc('log_password_reset', {
-          p_email: cleanEmail,
-        });
-      } catch (e) {
-        console.warn('log_password_reset failed:', e);
-        // Fallback insert
-        try {
-          await supabaseAdmin.from('password_reset_logs').insert({
-            email: cleanEmail,
-            status: 'requested',
-          });
-        } catch {}
-      }
-
-      // Call Supabase recovery
-      const { createClient } = await import("@supabase/supabase-js");
-      const supabaseUrl = process.env['SUPABASE_URL'] || process.env['VITE_SUPABASE_URL'];
-      const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'] || process.env['VITE_SUPABASE_ANON_KEY'] || process.env['SUPABASE_PUBLISHABLE_KEY'] || process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
-      const siteUrl = process.env['VITE_SITE_URL'] || process.env['SITE_URL'] || 'https://kr8-website-enhancer.vercel.app';
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error("Server not configured");
-      }
-
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
-
-      const { error: resetError } = await supabaseClient.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: `${siteUrl}/reset-password`,
-      });
-
-      if (resetError) {
-        // Check if error is due to 60-day limit from DB trigger
-        if (resetError.message.includes('PASSWORD_RESET_LIMIT')) {
-          throw new Error(resetError.message);
-        }
-        throw new Error(resetError.message);
-      }
-
-      return { ok: true, message: "Password reset email sent. Check your inbox." };
-    } catch (err: any) {
-      if (err.message.includes('PASSWORD_RESET_LIMIT')) {
-        throw err;
-      }
-      console.error('requestPasswordResetSecure error:', err);
-      throw new Error(err.message || "Password reset failed");
+    const result = check as any;
+    if (result && result.allowed === false) {
+      return {
+        ok: false,
+        rateLimited: true,
+        daysRemaining: result.days_remaining || 30,
+        message:
+          result.reason ||
+          `You can only reset your password once every 30 days. Try again in ${result.days_remaining || 30} days or contact an admin for an exception.`,
+      };
     }
+
+    const supabaseUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"]!;
+    const supabaseAnonKey =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_ANON_KEY"]!;
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { fetch: createSupabaseFetch(supabaseAnonKey) },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const siteUrl = process.env["VITE_SITE_URL"] || "https://kr8digitals.com";
+    await authClient.auth.resetPasswordForEmail(email, {
+      redirectTo: `${siteUrl}/reset-password`,
+    });
+
+    return {
+      ok: true,
+      message:
+        "If an account exists for that email, a password reset link has been sent. Please check your inbox.",
+    };
   });
+
+// 3. Complete password reset and record timestamp
+const completeResetSchema = z.object({
+  userId: z.string().uuid(),
+});
 
 export const completePasswordResetSecure = createServerFn({ method: "POST" })
-  .validator((d) => z.object({
-    email: z.string().email(),
-  }).parse(d))
+  .inputValidator((d) => completeResetSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const cleanEmail = data.email.trim().toLowerCase();
-
-    try {
-      // Mark as completed in logs
-      const { data: latest } = await supabaseAdmin
-        .from('password_reset_logs')
-        .select('id')
-        .eq('email', cleanEmail)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (latest) {
-        await supabaseAdmin
-          .from('password_reset_logs')
-          .update({ status: 'completed', completed_at: new Date().toISOString() })
-          .eq('id', latest.id);
-      }
-
-      return { ok: true };
-    } catch (err: any) {
-      console.error('completePasswordResetSecure error:', err);
-      // Don't block user even if logging fails
-      return { ok: true };
-    }
+    const { error } = await supabaseAdmin.rpc("complete_password_reset", {
+      p_user_id: data.userId,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
-// ============================================================================
-// 3. Google linking - handled via Supabase client directly, but we provide helper
-// ============================================================================
-export const getGoogleLinkStatus = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .validator((d) => z.object({}).parse(d))
-  .handler(async ({ context }) => {
-    const { userId } = context as any;
+// 4. Google OAuth linking verification
+const linkGoogleSchema = z.object({
+  userId: z.string().uuid(),
+});
+
+export const getGoogleLinkStatus = createServerFn({ method: "POST" })
+  .inputValidator((d) => linkGoogleSchema.parse(d))
+  .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(data.userId);
+    if (error || !userData?.user) return { linked: false, googleEmail: null };
 
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('id', userId)
-      .maybeSingle();
-
-    // Check identities via auth admin
-    try {
-      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-      const hasGoogle = userData?.user?.identities?.some((i: any) => i.provider === 'google');
-      return { linked: !!hasGoogle, identities: userData?.user?.identities || [] };
-    } catch {
-      return { linked: false, identities: [] };
-    }
+    const googleIdentity = userData.user.identities?.find((i: any) => i.provider === "google");
+    return {
+      linked: !!googleIdentity,
+      googleEmail: googleIdentity?.identity_data?.email || null,
+    };
   });

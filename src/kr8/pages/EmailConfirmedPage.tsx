@@ -1,163 +1,291 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "../router-shim";
-import { useSeo } from "../lib/useSeo";
-import { Pill, GradientButton } from "../components/ui";
+import { useNavigate, useLocation } from "../router-shim";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "../context/AuthContext";
+import { Card, Pill } from "../components/ui";
+import { useSeo } from "../lib/useSeo";
+import { OFFICIAL_WHATSAPP_LINKS, normalizeSkillWhatsAppUrl } from "../data/store";
+import * as welcomeFns from "@/lib/welcome.functions";
+import { useServerFn } from "@tanstack/react-start";
+
+const SKILL_DISPLAY: Record<string, string> = {
+  graphic: "Graphic Design",
+  web: "Website Development",
+  frontend: "Front-End Development",
+  video: "Video Editing & Animation",
+  content_creation: "Content Creation",
+  smm: "Social Media Management",
+  marketing: "Digital Marketing",
+  tribe: "KR8 Creative Tribe",
+};
 
 export default function EmailConfirmedPage() {
-  useSeo({ title: "Email Confirmed — Welcome to KR8!", description: "Join your WhatsApp learning group", path: "/auth/confirmed" });
-  const navigate = useNavigate();
-  const { student } = useAuth();
-  const [profile, setProfile] = useState<any>(null);
-  const [whatsappUrl, setWhatsappUrl] = useState<string>("");
-  const [skillName, setSkillName] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [joined, setJoined] = useState(false);
+  useSeo({
+    title: "Email Confirmed! Join Your WhatsApp Learning Group | KR8 Digitals",
+    description:
+      "Your KR8 Digitals email is officially confirmed! Join your WhatsApp learning group now to start your tuition-free cohort.",
+    path: "/auth/confirmed",
+    noindex: true,
+  });
+
+  const nav = useNavigate();
+  const location = useLocation();
+  const { user, refreshProfile, markWhatsAppOnboarding } = useAuth();
+  const sendWelcomeFn = useServerFn(welcomeFns.sendWelcomeWithWhatsapp);
+
+  const queryParams = new URLSearchParams(location.search);
+  const querySkill = queryParams.get("skill") || "";
+  const queryName = queryParams.get("name") || "";
+
+  const [status, setStatus] = useState<"verifying" | "ready">("verifying");
+  const [whatsappUrl, setWhatsappUrl] = useState(
+    normalizeSkillWhatsAppUrl(querySkill || "graphic")
+  );
+  const [skillName, setSkillName] = useState(
+    SKILL_DISPLAY[querySkill || "graphic"] || "Graphic Design"
+  );
+  const [kr8Id, setKr8Id] = useState("");
+  const [studentName, setStudentName] = useState(queryName || "Scholar");
+  const [busy, setBusy] = useState(false);
+  const [clickedWhatsApp, setClickedWhatsApp] = useState(false);
 
   useEffect(() => {
-    const init = async () => {
+    let cancelled = false;
+    const handleConfirm = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          // Try to get session from hash (Supabase email link)
-          const hash = window.location.hash;
-          if (hash) {
-            // supabase client will parse automatically, wait a bit
-            await new Promise(r => setTimeout(r, 1000));
-          }
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+        const tokenHash = url.searchParams.get("token_hash");
+        const type = url.searchParams.get("type") as any;
+
+        if (code) {
+          await supabase.auth.exchangeCodeForSession(code);
+        } else if (tokenHash && type) {
+          await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
         }
-        const { data: { user: u2 } } = await supabase.auth.getUser();
-        if (!u2) {
-          setLoading(false);
-          return;
-        }
-        const { data: prof } = await supabase.from('profiles').select('*').eq('id', u2.id).maybeSingle();
-        if (prof) {
-          setProfile(prof);
-          setSkillName(prof.skill || '');
-          // Fetch whatsapp url
-          if (prof.skill) {
-            const { data: skillRow } = await supabase.from('skill_settings').select('whatsapp_url,name').eq('skill_key', prof.skill).maybeSingle();
-            if (skillRow?.whatsapp_url) {
-              setWhatsappUrl(skillRow.whatsapp_url);
-              setSkillName(skillRow.name || prof.skill);
-            } else {
-              // fallback to store defaults
-              const map: Record<string, string> = {
-                graphic: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
-                web: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v?s=cl&p=a&mlu=4&ilr=4",
-                video: "https://chat.whatsapp.com/C9IyCVi8pWMJJUsErJhQ0M?s=cl&p=a&mlu=4&ilr=4",
-              };
-              setWhatsappUrl(map[prof.skill] || "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4");
+
+        await refreshProfile();
+        const {
+          data: { user: authUser },
+        } = await supabase.auth.getUser();
+
+        if (authUser && !cancelled) {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("id, kr8_id, name, skill")
+            .eq("id", authUser.id)
+            .maybeSingle();
+
+          const sk = prof?.skill || authUser.user_metadata?.skill || querySkill || "graphic";
+          const sName = SKILL_DISPLAY[sk] || sk;
+          const wa = normalizeSkillWhatsAppUrl(sk);
+
+          setKr8Id(prof?.kr8_id || "");
+          setStudentName(prof?.name || authUser.user_metadata?.name || queryName || "Scholar");
+          setSkillName(sName);
+          setWhatsappUrl(wa);
+
+          try {
+            const res: any = await sendWelcomeFn({
+              data: { userId: authUser.id, skillKey: sk },
+            });
+            if (res?.whatsappUrl) {
+              setWhatsappUrl(normalizeSkillWhatsAppUrl(sk, res.whatsappUrl));
             }
-          }
-          // Update email_confirmed_at
-          await supabase.from('profiles').update({ email_confirmed_at: new Date().toISOString() }).eq('id', u2.id);
+            if (res?.skillName) {
+              setSkillName(res.skillName);
+            }
+          } catch {}
         }
       } catch (e) {
-        console.warn(e);
+        console.warn("[EmailConfirmedPage] verification notice:", e);
       } finally {
-        setLoading(false);
+        if (!cancelled) setStatus("ready");
       }
     };
-    init();
+    handleConfirm();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleDone = async () => {
-    if (profile) {
-      try {
-        await supabase.from('profiles').update({ whatsapp_joined: true, whatsapp_joined_at: new Date().toISOString() }).eq('id', profile.id);
-        await supabase.from('notifications').insert({
-          user_id: profile.id,
-          text: `Welcome to KR8 ${skillName}! Your KR8 ID ${profile.kr8_id} is active. Class Mon/Wed/Fri 9PM-12AM WAT. Check attendance daily.`,
-          read: false,
-          link: '/academy',
-        });
-      } catch {}
+  // Keep synced with AuthContext user if loaded
+  useEffect(() => {
+    if (user) {
+      if (user.kr8_id && !kr8Id) setKr8Id(user.kr8_id);
+      if (user.name) setStudentName(user.name);
+      if (user.skill) {
+        setSkillName(SKILL_DISPLAY[user.skill] || user.skill);
+        setWhatsappUrl(normalizeSkillWhatsAppUrl(user.skill));
+      }
     }
-    navigate('/academy');
+  }, [user, kr8Id]);
+
+  const handleDone = async () => {
+    setBusy(true);
+    try {
+      await markWhatsAppOnboarding(true, false);
+      await refreshProfile();
+    } catch {}
+    setBusy(false);
+    nav(user ? "/academy" : "/signin");
   };
 
   const handleSkip = async () => {
-    if (profile) {
-      try {
-        await supabase.from('profiles').update({ onboarding_skipped: true }).eq('id', profile.id);
-      } catch {}
-    }
-    navigate('/academy');
+    setBusy(true);
+    try {
+      await markWhatsAppOnboarding(false, true);
+      await refreshProfile();
+    } catch {}
+    setBusy(false);
+    nav(user ? "/academy" : "/signin?remind_whatsapp=1");
   };
 
-  const handleJoin = () => {
-    setJoined(true);
-    if (whatsappUrl) window.open(whatsappUrl, '_blank');
-  };
-
-  if (loading) {
-    return <div className="section-bg min-h-screen flex items-center justify-center"><div className="h-10 w-10 rounded-full border-2 border-pink-500 border-t-transparent animate-spin" /></div>;
+  if (status === "verifying") {
+    return (
+      <div className="section-bg min-h-screen flex items-center justify-center px-5">
+        <Card className="p-10 text-center max-w-md border-pink-500/30">
+          <div className="mx-auto h-12 w-12 rounded-full border-2 border-pink-500 border-t-transparent animate-spin" />
+          <p className="mt-4 text-base font-bold text-white">
+            Confirming your email & preparing your KR8 Learning Group...
+          </p>
+        </Card>
+      </div>
+    );
   }
 
   return (
-    <div className="section-bg min-h-[90vh] flex items-center justify-center px-5 py-16">
-      <div className="mx-auto max-w-2xl w-full text-center">
-        <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-[2rem] bg-gradient-to-br from-emerald-500/30 via-pink-500/20 to-purple-500/30 border-2 border-emerald-500/40 shadow-2xl shadow-emerald-500/20 animate-bounce">
-          <span className="text-5xl">🎊</span>
-        </div>
-        <Pill>✅ Email Confirmed — You're Officially In!</Pill>
-        <h1 className="font-display mt-6 text-4xl sm:text-5xl font-black text-white leading-tight">
-          Welcome to the <span className="text-gradient">Family, {profile?.name?.split(' ')[0] || 'Creator'}!</span>
-        </h1>
-        <p className="mt-4 text-base sm:text-lg text-[#cabfe0] leading-relaxed">
-          Your KR8 ID <strong className="font-mono text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded">{profile?.kr8_id || 'generated'}</strong> is now verified and active. You just unlocked tuition-free training, live feedback, and a tribe that never lets you build alone.
-        </p>
+    <div className="section-bg min-h-screen py-12 sm:py-16 px-4">
+      <div className="mx-auto max-w-2xl">
+        <Card className="p-6 sm:p-10 text-center border-emerald-500/40 relative overflow-hidden shadow-2xl shadow-emerald-500/15">
+          <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-pink-500/20 blur-3xl pointer-events-none" />
 
-        <div className="mt-8 rounded-3xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/30 via-[#1a0030] to-pink-950/30 p-6 sm:p-8 text-left shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-full blur-2xl" />
-          <div className="relative flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-3xl">📲</div>
-            <div className="flex-1">
-              <h3 className="text-xl font-black text-white">FINAL STEP: Join Your Learning Group on WhatsApp</h3>
-              <p className="mt-2 text-sm text-[#cabfe0] leading-relaxed">
-                This is where the magic happens — daily live class links (Mon/Wed/Fri 9PM-12AM WAT), assignment drops, accountability, and direct access to senior instructors.
-                <span className="block mt-2 text-emerald-300 font-bold text-base">👉 Unmistakable — click the green button below NOW. Don't skip this.</span>
+          {/* Big Celebration Icon */}
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-4xl shadow-2xl shadow-emerald-500/40 animate-bounce">
+            🥳
+          </div>
+
+          <Pill className="border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
+            Email Confirmed · Welcome to KR8 Digitals!
+          </Pill>
+
+          <h1 className="font-display mt-4 text-3xl sm:text-5xl font-black text-white leading-tight">
+            Congratulations,{" "}
+            <span className="text-gradient">{studentName.split(" ")[0]}!</span> You're Officially In! 🎉
+          </h1>
+
+          <p className="mt-3 text-sm sm:text-base text-[#d8cce8] max-w-xl mx-auto leading-relaxed">
+            Your email is confirmed and your tuition-free scholarship seat in{" "}
+            <strong className="text-white">{skillName}</strong> is officially active!
+          </p>
+
+          {kr8Id && (
+            <div className="mt-6 rounded-2xl border border-pink-500/40 bg-pink-500/10 p-4 max-w-md mx-auto">
+              <p className="text-[10px] uppercase tracking-widest text-pink-300 font-black">
+                Your Official Verifiable KR8 ID
               </p>
+              <p className="font-mono text-xl sm:text-2xl font-black text-white mt-1 tracking-wider">
+                {kr8Id}
+              </p>
+              <p className="text-[11px] text-[#cabfe0] mt-1">
+                Verifiable worldwide at <span className="text-pink-300">kr8digitals.com/verify</span>
+              </p>
+            </div>
+          )}
 
-              {whatsappUrl ? (
-                <div className="mt-6">
-                  <a href={whatsappUrl} target="_blank" rel="noreferrer" onClick={handleJoin} className="group relative flex w-full items-center justify-center gap-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 px-8 py-5 text-base font-black text-white shadow-2xl shadow-emerald-500/30 transition-all hover:scale-[1.02] active:scale-98">
-                    <span className="text-2xl">💬</span>
-                    <span>Join {skillName || 'My'} WhatsApp Group — It's Free →</span>
-                    <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-emerald-600 text-xs font-black animate-pulse">!</span>
-                  </a>
-                  <p className="mt-3 text-[11px] text-center text-[#8a7ba8]">Opens WhatsApp • 1,500+ active learners • You can mute notifications, but don't leave</p>
-                </div>
-              ) : (
-                <div className="mt-4 rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-200">WhatsApp link loading... If it doesn't appear, contact support.</div>
-              )}
+          {/* UNMISTAKABLE WHATSAPP LEARNING GROUP CALLOUT */}
+          <div className="mt-7 rounded-3xl border-2 border-[#25D366] bg-gradient-to-br from-[#25D366]/20 via-emerald-950/60 to-black/70 p-6 sm:p-8 shadow-2xl shadow-[#25D366]/20">
+            <span className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-1 text-[11px] font-black uppercase tracking-widest text-black">
+              📲 FINAL STEP · DO NOT MISS THIS!
+            </span>
 
-              <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button onClick={handleDone} className={`rounded-full px-6 py-3 text-sm font-bold transition ${joined ? 'bg-gradient-pink text-white shadow-xl' : 'bg-white/10 border border-white/15 text-[#8a7ba8] hover:text-white'}`}>
-                  {joined ? '✓ I Joined — Take Me to My Profile →' : 'I Joined — Done →'}
-                </button>
-                <button onClick={handleSkip} className="rounded-full border border-white/10 bg-transparent px-6 py-3 text-xs font-semibold text-[#8a7ba8] hover:text-white">
-                  Skip for now → Go to Profile
-                </button>
+            <h2 className="font-display mt-4 text-2xl sm:text-3xl font-black text-white leading-snug">
+              Join Your {skillName} Learning Group on WhatsApp Now!
+            </h2>
+
+            <p className="mt-3 text-sm sm:text-base text-emerald-100 leading-relaxed max-w-lg mx-auto">
+              All live class links (<strong className="text-white">Mon/Wed/Fri 9PM–12AM WAT</strong>), practical assignments (<strong className="text-white">Tue/Thu/Sat</strong>), and mentor feedback are shared directly inside your WhatsApp Learning Group.
+            </p>
+
+            {/* Primary Huge WhatsApp Button */}
+            <div className="mt-6">
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setClickedWhatsApp(true)}
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-3 rounded-full bg-[#25D366] hover:bg-[#20bd5a] px-8 py-4 sm:py-5 text-base sm:text-lg font-black text-black shadow-2xl shadow-[#25D366]/40 hover:scale-[1.03] active:scale-95 transition-all"
+              >
+                <span className="text-2xl">💬</span>
+                <span>Join {skillName} WhatsApp Group →</span>
+              </a>
+            </div>
+
+            {clickedWhatsApp && (
+              <p className="mt-3 text-xs font-bold text-emerald-300">
+                ✓ WhatsApp opened! Once you've joined the group, click "Done — Go to My Profile" below!
+              </p>
+            )}
+
+            {/* Direct links for all 3 official learning tracks in case they need them */}
+            <div className="mt-6 border-t border-white/10 pt-4">
+              <p className="text-[11px] uppercase tracking-wider font-bold text-[#a594c7] mb-2.5">
+                Official Cohort WhatsApp Groups by Track:
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <a
+                  href={OFFICIAL_WHATSAPP_LINKS.graphic}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setClickedWhatsApp(true)}
+                  className="rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-bold text-white transition-all"
+                >
+                  🎨 Graphic Design Group ↗
+                </a>
+                <a
+                  href={OFFICIAL_WHATSAPP_LINKS.web}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setClickedWhatsApp(true)}
+                  className="rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-bold text-white transition-all"
+                >
+                  💻 Website Development Group ↗
+                </a>
+                <a
+                  href={OFFICIAL_WHATSAPP_LINKS.video}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setClickedWhatsApp(true)}
+                  className="rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-bold text-white transition-all"
+                >
+                  🎬 Video Editing Group ↗
+                </a>
               </div>
-              <p className="mt-3 text-[11px] text-[#6a5b82] text-center">If you skip, we'll remind you next time you log in. But seriously, join now — classes are live.</p>
             </div>
           </div>
-        </div>
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs text-[#8a7ba8] text-left">
-          <p className="font-bold text-white">What happens next:</p>
-          <ul className="mt-2 space-y-1 list-disc list-inside">
-            <li>Class holds Mon/Wed/Fri 9PM-12AM WAT — attendance window auto-opens</li>
-            <li>Assignments Tue/Thu/Sat — submit with date/topic/time + proof image</li>
-            <li>Mindset Shift 1st & 3rd Sunday 7PM-11PM, attendance 10PM-11PM auto-marked via live</li>
-            <li>Hangout last Sunday same time — community vibes</li>
-            <li>Earn XP, climb leaderboard, graduate with verifiable QR certificate</li>
-          </ul>
-        </div>
+          {/* Done or Skip Actions */}
+          <div className="mt-8 space-y-3">
+            <button
+              type="button"
+              onClick={handleDone}
+              disabled={busy}
+              className="w-full rounded-full bg-gradient-pink py-4 px-8 text-sm sm:text-base font-black text-white shadow-xl shadow-pink-500/30 hover:scale-[1.01] active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            >
+              ✓ I've Joined My WhatsApp Group — Done! Go to My Profile →
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={busy}
+              className="w-full rounded-full border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] py-3 px-6 text-xs sm:text-sm font-semibold text-[#b8aecf] hover:text-white transition-all cursor-pointer disabled:opacity-50"
+            >
+              Skip for now — Go to My Profile (Remind me next time I log in)
+            </button>
+          </div>
+        </Card>
       </div>
     </div>
   );

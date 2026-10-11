@@ -187,14 +187,23 @@ export const issueCertificate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => issueSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context as any;
+    const { userId, user } = context as any;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId || ""));
+    const safeActorUuid = isUuid ? userId : null;
 
-    // Check admin with issue_certificates permission via DB
+    // Check admin with issue_certificates permission via DB or Executive status
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: roles } = await supabaseAdmin.from('user_roles').select('role, permissions').eq('user_id', userId);
-    
+    const { data: roles } = isUuid
+      ? await supabaseAdmin.from('user_roles').select('role, permissions').eq('user_id', userId)
+      : { data: [] };
+
+    const execEmail = String(user?.email || "").toLowerCase();
+    const isExecutive =
+      Boolean(user?.is_executive) ||
+      ["kr8digitals01@gmail.com", "kutimfire001@gmail.com", "stevenson@kr8digitals.com", "daniel@kr8digitals.com"].includes(execEmail);
+
     // Founder has all permissions
-    const isFounder = roles?.some((r: any) => r.role === 'founder');
+    const isFounder = isExecutive || roles?.some((r: any) => r.role === 'founder');
     const hasIssuePermission = isFounder || roles?.some((r: any) => {
       if (['founder','co-founder'].includes(r.role)) return true;
       const perms = r.permissions as string[] || [];
@@ -205,32 +214,50 @@ export const issueCertificate = createServerFn({ method: "POST" })
       throw new Error("Only admins with issue_certificates permission can issue certificates");
     }
 
-    // Fetch student profile
-    const { data: studentProfile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', data.studentId)
-      .maybeSingle();
+    // Fetch student profile by UUID id or kr8_id
+    let studentProfile: any = null;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.studentId)) {
+      const { data: p } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('id', data.studentId)
+        .maybeSingle();
+      studentProfile = p;
+    }
+    if (!studentProfile) {
+      const { data: pByKr8 } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(`kr8_id.ilike.${data.kr8Id},kr8_id.ilike.${data.studentId}`)
+        .limit(1);
+      studentProfile = pByKr8?.[0] || null;
+    }
 
-    if (profileError || !studentProfile) {
+    if (!studentProfile) {
       throw new Error(`Student profile not found: ${data.studentId}`);
     }
+
+    const resolvedStudentUuid = studentProfile.id;
 
     // Check for existing active certificate for same skill (idempotency)
     const { data: existing } = await supabaseAdmin
       .from('certificates')
       .select('*')
-      .eq('student_id', data.studentId)
+      .eq('student_id', resolvedStudentUuid)
       .eq('skill', data.skill)
       .eq('status', 'active')
       .maybeSingle();
 
     if (existing) {
-      // Idempotent: return existing instead of creating duplicate
+      // Ensure profile is marked graduated
+      await supabaseAdmin
+        .from('profiles')
+        .update({ graduated: true, cert_tier: existing.tier || data.tier })
+        .eq('id', resolvedStudentUuid);
       return { certificate: existing, isNew: false };
     }
 
-    const certCode = generateCertificateCode(data.kr8Id, data.skill);
+    const certCode = generateCertificateCode(studentProfile.kr8_id || data.kr8Id, data.skill);
 
     // Use edited name if provided, otherwise profile name - certificate must use edited name, profile stays linked without duplicate
     const finalName = (data as any).editedName?.trim() || studentProfile.name;
@@ -241,8 +268,8 @@ export const issueCertificate = createServerFn({ method: "POST" })
       .from('certificates')
       .insert({
         certificate_code: certCode,
-        student_id: data.studentId,
-        kr8_id: data.kr8Id,
+        student_id: resolvedStudentUuid,
+        kr8_id: studentProfile.kr8_id || data.kr8Id,
         student_name: finalName,
         formatted_name: finalName.toUpperCase(),
         skill: data.skill,
@@ -254,7 +281,7 @@ export const issueCertificate = createServerFn({ method: "POST" })
           : "gaining hands-on experience in turning client requests into finished designs."),
         additional_notes: data.additionalNotes || null,
         issued_at: new Date().toISOString(),
-        issued_by: userId,
+        issued_by: safeActorUuid,
         status: 'active',
       })
       .select()
@@ -277,7 +304,7 @@ export const issueCertificate = createServerFn({ method: "POST" })
     await supabaseAdmin
       .from('profiles')
       .update(profileUpdate)
-      .eq('id', data.studentId);
+      .eq('id', resolvedStudentUuid);
 
     // Also update legacy accounts table during migration
     try {
@@ -285,25 +312,29 @@ export const issueCertificate = createServerFn({ method: "POST" })
         graduated: true,
         cert_tier: data.tier,
         cert_recognition: data.additionalNotes,
-      }).eq('id', data.kr8Id);
+      }).eq('id', studentProfile.kr8_id || data.kr8Id);
     } catch {}
 
     // Create enrollment record
-    await supabaseAdmin.from('enrollments').upsert({
-      user_id: data.studentId,
-      skill_key: data.skill,
-      skill_name: data.skillName,
-      graduated: true,
-      graduated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,skill_key' });
+    try {
+      await supabaseAdmin.from('enrollments').upsert({
+        user_id: resolvedStudentUuid,
+        skill_key: data.skill,
+        skill_name: data.skillName,
+        graduated: true,
+        graduated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,skill_key' });
+    } catch {}
 
     // Log activity
-    await supabaseAdmin.from('activity_log').insert({
-      actor_id: userId,
-      action: 'certificate_issued',
-      target: studentProfile.name,
-      details: { certificate_code: certCode, skill: data.skill, tier: data.tier, kr8_id: data.kr8Id },
-    });
+    try {
+      await supabaseAdmin.from('activity_log').insert({
+        actor_id: safeActorUuid,
+        action: 'certificate_issued',
+        target: studentProfile.name,
+        details: { certificate_code: certCode, skill: data.skill, tier: data.tier, kr8_id: studentProfile.kr8_id || data.kr8Id },
+      });
+    } catch {}
 
     // Send email via Resend (async, don't block response but record result)
     let emailResult;
@@ -348,11 +379,19 @@ export const withdrawCertificate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => withdrawSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { userId } = context as any;
+    const { userId, user } = context as any;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId || ""));
+    const safeActorUuid = isUuid ? userId : null;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: roles } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
-    const isAdmin = roles?.some((r: any) => ['founder','co-founder','admin'].includes(r.role));
+    const { data: roles } = isUuid
+      ? await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId)
+      : { data: [] };
+    const execEmail = String(user?.email || "").toLowerCase();
+    const isAdmin =
+      Boolean(user?.is_executive) ||
+      ["kr8digitals01@gmail.com", "kutimfire001@gmail.com", "stevenson@kr8digitals.com", "daniel@kr8digitals.com"].includes(execEmail) ||
+      roles?.some((r: any) => ['founder','co-founder','admin'].includes(r.role));
     if (!isAdmin) throw new Error("Only admins can withdraw certificates");
 
     const { data: cert, error: fetchError } = await supabaseAdmin
@@ -369,7 +408,7 @@ export const withdrawCertificate = createServerFn({ method: "POST" })
         status: 'withdrawn',
         withdrawal_reason: data.reason,
         withdrawn_at: new Date().toISOString(),
-        withdrawn_by: userId,
+        withdrawn_by: safeActorUuid,
       })
       .eq('id', data.certificateId)
       .select()
@@ -392,12 +431,14 @@ export const withdrawCertificate = createServerFn({ method: "POST" })
       }).eq('id', cert.student_id);
     }
 
-    await supabaseAdmin.from('activity_log').insert({
-      actor_id: userId,
-      action: 'certificate_withdrawn',
-      target: cert.student_name,
-      details: { certificate_code: cert.certificate_code, reason: data.reason },
-    });
+    try {
+      await supabaseAdmin.from('activity_log').insert({
+        actor_id: safeActorUuid,
+        action: 'certificate_withdrawn',
+        target: cert.student_name,
+        details: { certificate_code: cert.certificate_code, reason: data.reason },
+      });
+    } catch {}
 
     return { certificate: updated };
   });
@@ -406,11 +447,18 @@ export const resendCertificateEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => resendEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { userId } = context as any;
+    const { userId, user } = context as any;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId || ""));
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: roles } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
-    const isAdmin = roles?.some((r: any) => ['founder','co-founder','admin'].includes(r.role));
+    const { data: roles } = isUuid
+      ? await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId)
+      : { data: [] };
+    const execEmail = String(user?.email || "").toLowerCase();
+    const isAdmin =
+      Boolean(user?.is_executive) ||
+      ["kr8digitals01@gmail.com", "kutimfire001@gmail.com", "stevenson@kr8digitals.com", "daniel@kr8digitals.com"].includes(execEmail) ||
+      roles?.some((r: any) => ['founder','co-founder','admin'].includes(r.role));
     if (!isAdmin) throw new Error("Only admins can resend emails");
 
     const { data: cert } = await supabaseAdmin.from('certificates').select('*').eq('id', data.certificateId).maybeSingle();

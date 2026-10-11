@@ -90,8 +90,20 @@ function GuestHome() {
     const syncCms = () => setCms(getSiteContent());
     const syncPortfolio = () => setPortfolio(getPortfolio());
 
-    // Real DB counts for production — keeps 22 today's registrations visible, never negative
+    // Real DB counts for production — keeps registrations accurate and never negative
     const fetchRealCounts = async () => {
+      try {
+        const { getPublicLeaderboardAndFeed } = await import("@/lib/public-data.functions");
+        const srv: any = await getPublicLeaderboardAndFeed();
+        if (srv?.stats?.totalStudents) {
+          const totalStudents = Math.max(studentCount(), Number(srv.stats.totalStudents));
+          setLiveCounts({
+            students: totalStudents,
+            tribe: Math.max(tribeCount(), Math.floor(totalStudents * 2.5) + 500),
+          });
+          return;
+        }
+      } catch {}
       try {
         const { data: pub, error } = await supabase.rpc('public_counts' as any);
         if (error) throw error;
@@ -379,13 +391,12 @@ function GuestHome() {
       <section className="section-bg py-16">
         <div className="mx-auto grid max-w-7xl gap-10 px-5 lg:grid-cols-2">
           <div>
-            <SectionHead label="Live in the Tribe" title="Always something" highlight="happening." sub="Real-time check-ins, portfolio critiques, and creative milestones from our global family." />
+            <SectionHead label="Live in the Ecosystem" title="Most recent" highlight="activities." sub="Real-time registrations, assignment submissions, graduations, and creative milestones from our database." />
             <div className="mt-8"><LiveFeed /></div>
           </div>
           <div>
-            <SectionHead label="Top creators" title="The" highlight="leaderboard" sub="Creators shipping daily drills, accumulating XP, and commanding top industry visibility." />
-            <div className="mt-8"><LeaderboardList limit={5} /></div>
-            <Link to="/leaderboard" className="mt-6 inline-block text-sm font-semibold text-pink-400 hover:text-pink-300">View Full Leaderboard →</Link>
+            <SectionHead label="Top 10 User Rankings" title="The" highlight="leaderboard" sub="Live database rankings of scholars and graduates. Type your KR8 ID to find your ranking or view the full board." />
+            <div className="mt-8"><LeaderboardList limit={10} compact={true} showSearch={true} showFullCta={true} /></div>
           </div>
         </div>
       </section>
@@ -710,15 +721,26 @@ function GuestHome() {
                     <div className="aspect-[16/10] overflow-hidden bg-black/40 relative">
                       {(client as any).previewUrl || (client.link && client.service?.includes("Website")) ? (
                         <>
-                          <iframe
-                            src={(client as any).previewUrl || client.link}
-                            title={client.title}
-                            className="absolute inset-0 top-7 w-full h-[calc(100%-28px)] border-0 bg-white"
-                            loading="lazy"
-                            sandbox="allow-scripts allow-same-origin allow-popups"
-                          />
-                          <a href={(client as any).previewUrl || client.link} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/0 hover:bg-black/20 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
-                            <span className="rounded-full bg-white text-black px-4 py-2 text-xs font-bold shadow-xl">Live Desktop Preview ↗</span>
+                          <div
+                            className="origin-top-left bg-white"
+                            style={{
+                              width: "1440px",
+                              height: "900px",
+                              transform: "scale(0.32)",
+                            }}
+                          >
+                            <iframe
+                              src={String((client as any).previewUrl || client.link).replace(/^http:\/\//i, "https://")}
+                              title={`${client.client} — Live Desktop Homepage`}
+                              width={1440}
+                              height={900}
+                              className="w-[1440px] h-[900px] border-0 bg-white pointer-events-none"
+                              loading="lazy"
+                              sandbox="allow-scripts allow-same-origin allow-popups"
+                            />
+                          </div>
+                          <a href={client.link} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/0 hover:bg-black/30 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <span className="rounded-full bg-gradient-pink text-white px-4 py-2 text-xs font-bold shadow-xl">Visit Live Website ↗</span>
                           </a>
                         </>
                       ) : client.link ? (

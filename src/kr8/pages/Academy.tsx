@@ -249,7 +249,13 @@ function Profile({ student }: { student: Account }) {
   const [tab, setTab] = useState<"posts" | "portfolio" | "activity" | "about">("posts");
   const [profile, setProfile] = useState(student);
   const [copiedId, setCopiedId] = useState(false);
-  const { signOut, addNotification } = useAuth();
+  const {
+    signOut,
+    addNotification,
+    whatsappReminderPending,
+    markWhatsAppOnboarding,
+    dismissWhatsappReminderForSession,
+  } = useAuth() as any;
   const skill = getSkill(profile.skill);
   const rankedSafe = safeArray(getStudents(), []).filter((account: any) => !(account as any).isPlaceholder).sort((a: any, b: any) => b.points - a.points);
   const rank = rankedSafe.findIndex((s: any) => s.id === profile.id) + 1;
@@ -264,7 +270,7 @@ function Profile({ student }: { student: Account }) {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(profile.id);
       else { const textarea = document.createElement("textarea"); textarea.value = profile.id; document.body.appendChild(textarea); textarea.select(); document.execCommand("copy"); document.body.removeChild(textarea); }
-      setCopiedId(true); addNotification(`KR8 ID copied: ${profile.id}`); setTimeout(() => setCopiedId(false), 2000);
+      setCopiedId(true); if (typeof addNotification === "function") addNotification(`KR8 ID copied: ${profile.id}`); setTimeout(() => setCopiedId(false), 2000);
     } catch { setCopiedId(true); setTimeout(() => setCopiedId(false), 2000); }
   };
 
@@ -301,6 +307,52 @@ function Profile({ student }: { student: Account }) {
             <div className="flex items-center gap-2 pt-1 flex-wrap"><Link to="/settings" className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/[0.04] px-3.5 py-1.5 text-xs font-semibold text-white"><Icon name="cog" size={13} /><span>Settings</span></Link><button onClick={() => { signOut(); navigate("/"); }} className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3.5 py-1.5 text-xs font-semibold text-rose-300">Sign Out</button></div>
           </div>
         </div>
+
+        {(whatsappReminderPending || (!(profile as any).whatsappJoined && !(profile as any).graduated && profile.type === "student")) && (
+          <div className="mt-6 rounded-3xl border-2 border-[#25D366] bg-gradient-to-r from-[#25D366]/20 via-emerald-950/70 to-[#120022] p-5 sm:p-7 shadow-2xl shadow-[#25D366]/15">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#25D366] px-3 py-0.5 text-[10px] font-black uppercase tracking-widest text-black">
+                  📲 Important · Join Your Class WhatsApp Group
+                </span>
+                <h3 className="font-display mt-1.5 text-xl sm:text-2xl font-black text-white">
+                  Join the Official {skill?.name || "KR8 Academy"} WhatsApp Learning Group!
+                </h3>
+                <p className="mt-1 text-xs sm:text-sm text-emerald-100 max-w-2xl">
+                  All live classes (<strong className="text-white">Mon/Wed/Fri 9PM–12AM WAT</strong>), assignments (<strong className="text-white">Tue/Thu/Sat</strong>), and mentor feedback are shared inside your track's WhatsApp group.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <a
+                  href={getSkillWhatsApp(profile.skill || "graphic")}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#25D366] hover:bg-[#20bd5a] px-6 py-3 text-xs sm:text-sm font-black text-black shadow-lg"
+                >
+                  📲 Join {skill?.name || "Class"} WhatsApp Group →
+                </a>
+                {typeof markWhatsAppOnboarding === "function" && (
+                  <button
+                    type="button"
+                    onClick={() => markWhatsAppOnboarding(true, false)}
+                    className="rounded-full bg-white/15 hover:bg-white/25 border border-white/20 px-4 py-3 text-xs font-bold text-white cursor-pointer"
+                  >
+                    ✓ I've Joined — Done
+                  </button>
+                )}
+                {typeof dismissWhatsappReminderForSession === "function" && (
+                  <button
+                    type="button"
+                    onClick={dismissWhatsappReminderForSession}
+                    className="rounded-full border border-white/10 px-3 py-2 text-[11px] text-[#a594c7] hover:text-white cursor-pointer"
+                  >
+                    Later
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {showWelcomeBanner && (
           <div className="mt-6 overflow-hidden rounded-3xl border-2 border-pink-500/50 bg-gradient-to-r from-pink-950/60 via-[#180829] to-purple-950/60 p-6 sm:p-8 shadow-2xl relative">
@@ -414,14 +466,85 @@ function StudentCertificateSection({ profile, onDownload }: { profile: Account; 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+    const mapRow = (c: any) => ({
+      id: c.certificate_code || c.id,
+      studentId: c.kr8_id || profile.id,
+      studentName: c.student_name || profile.name,
+      formattedName: c.formatted_name || String(c.student_name || profile.name).toUpperCase(),
+      skill: c.skill || profile.skill || "graphic",
+      skillName: c.skill_name || getSkill(c.skill || profile.skill)?.name || "KR8 Academy Track",
+      tier: c.tier === "Completion" ? "Completion" : "Professionalism",
+      templateUrl:
+        c.template_url ||
+        `/certificates/reusable_${String(c.tier || "professionalism").toLowerCase()}.png`,
+      achievementText:
+        c.achievement_text ||
+        "demonstrating excellence and proficiency in turning client requests into client satisfaction.",
+      additionalNotes: c.additional_notes || undefined,
+      issuedAt: c.issued_at ? new Date(c.issued_at).getTime() : Date.now(),
+      status: c.status === "withdrawn" ? "withdrawn" : "active",
+      withdrawalReason: c.withdrawal_reason || undefined,
+    });
+
     const load = async () => {
       try {
-        const { data } = await supabase.from('certificates').select('*').eq('user_id', profile.id).eq('status', 'active').order('issued_at', { ascending: false });
-        if (data) setCerts(data);
-      } catch {} finally { setLoading(false); }
+        // 1. Query server function for guaranteed service_role lookup across student_id + kr8_id + profile.graduated synthesis
+        try {
+          const { getStudentCredentials } = await import("@/lib/public-data.functions");
+          const srvRes: any = await getStudentCredentials({
+            data: {
+              userId: (profile as any).userId || (profile as any).authId,
+              kr8Id: (profile as any).kr8_id || profile.id,
+              email: profile.email,
+            },
+          });
+          if (active && srvRes?.certificates?.length > 0) {
+            setCerts(srvRes.certificates.map(mapRow));
+            setLoading(false);
+            return;
+          }
+        } catch {}
+
+        // 2. Direct Supabase query by kr8_id or student_id
+        const { data } = await supabase
+          .from("certificates")
+          .select("*")
+          .eq("kr8_id", profile.id)
+          .eq("status", "active")
+          .order("issued_at", { ascending: false });
+        if (active && data && data.length > 0) {
+          setCerts(data.map(mapRow));
+          setLoading(false);
+          return;
+        }
+
+        // 3. Synthesize if profile.graduated is true
+        if (active && profile.graduated) {
+          setCerts([
+            mapRow({
+              certificate_code: `CERT-KR8-${profile.id}-${String(profile.skill || "KR8").toUpperCase()}`,
+              kr8_id: profile.id,
+              student_name: profile.name,
+              formatted_name: profile.name.toUpperCase(),
+              skill: profile.skill || "graphic",
+              skill_name: getSkill(profile.skill)?.name || "Graphic Design",
+              tier: (profile as any).certTier || "Professionalism",
+              additional_notes: (profile as any).certRecognition || undefined,
+              issued_at: new Date((profile as any).joined || Date.now()).toISOString(),
+              status: "active",
+            }),
+          ]);
+        }
+      } catch {} finally {
+        if (active) setLoading(false);
+      }
     };
     load();
-  }, [profile.id]);
+    return () => {
+      active = false;
+    };
+  }, [profile.id, profile.graduated]);
 
   if (loading) return <p className="mt-2 text-sm text-[#8a7ba8]">Loading certificates...</p>;
 
@@ -436,18 +559,18 @@ function StudentCertificateSection({ profile, onDownload }: { profile: Account; 
   }
 
   const activeCert = certs[0];
+  const verifyUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://www.kr8digitals.com'}/verify?id=${encodeURIComponent(profile.id)}&cert=${encodeURIComponent(activeCert.id)}`;
 
   const handleCopyLink = () => {
-    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/verify?id=${encodeURIComponent(profile.id)}&cert=${encodeURIComponent(activeCert.id)}`;
-    try { navigator.clipboard.writeText(url); } catch {}
+    try { navigator.clipboard.writeText(verifyUrl); } catch {}
     setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
     <div className="mt-3 space-y-4">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2"><div><div className="flex items-center gap-2"><span className="font-bold text-white text-base">Certificate of {activeCert.tier}</span><span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-green-500/20 text-green-300 border border-green-500/30">Active & Valid ✓</span></div><p className="text-xs text-[#8a7ba8] mt-0.5">{activeCert.skill_name} · Issued on {new Date(activeCert.issued_at).toLocaleDateString()}</p></div></div>
-        <CertificateDocumentView cert={activeCert} student={profile} maxHeight="380px" />
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2"><div><div className="flex items-center gap-2"><span className="font-bold text-white text-base">Certificate of {activeCert.tier}</span><span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-green-500/20 text-green-300 border border-green-500/30">Active & Valid ✓</span></div><p className="text-xs text-[#8a7ba8] mt-0.5">{activeCert.skillName} · Issued on {new Date(activeCert.issuedAt).toLocaleDateString()}</p></div></div>
+        <CertificateDocumentView cert={activeCert} student={profile} verifyUrl={verifyUrl} maxHeight="380px" />
         <div className="space-y-2 pt-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <GradientButton onClick={() => downloadCertificatePdf(profile.name, null, activeCert, profile)} className="w-full flex items-center justify-center gap-2"><Icon name="certificate" size={15} /> Download PDF →</GradientButton>
@@ -457,7 +580,7 @@ function StudentCertificateSection({ profile, onDownload }: { profile: Account; 
           <div className="rounded-2xl border border-pink-400/30 bg-pink-500/5 p-4 space-y-2">
             <div className="flex items-center justify-between"><p className="text-xs font-bold text-white">Shareable Verification Reference</p><span className="text-[10px] text-pink-300 font-mono">Live QR Target</span></div>
             <p className="text-[11px] leading-relaxed text-[#b8aecf]">Employers can verify your certificate status instantly:</p>
-            <div className="flex items-center gap-2"><input readOnly value={`${typeof window !== 'undefined' ? window.location.origin : ''}/verify?id=${encodeURIComponent(profile.id)}&cert=${encodeURIComponent(activeCert.id)}`} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 font-mono text-[11px] text-pink-300" /><button onClick={handleCopyLink} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white">{copiedLink ? "Copied! ✓" : "Copy Link"}</button></div>
+            <div className="flex items-center gap-2"><input readOnly value={verifyUrl} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 font-mono text-[11px] text-pink-300" /><button onClick={handleCopyLink} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white">{copiedLink ? "Copied! ✓" : "Copy Link"}</button></div>
           </div>
         </div>
       </div>

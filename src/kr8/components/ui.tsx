@@ -4,8 +4,27 @@ import { useState, type ReactNode } from "react";
 import { generateDefaultAvatar } from "../data/store";
 
 function driveFallback(src: string) {
-  const id = src.match(/[?&]id=([^&]+)/)?.[1];
+  if (!src) return "";
+  const id = src.match(/[?&]id=([^&]+)/)?.[1] || src.match(/\/file\/d\/([^/]+)/)?.[1] || src.match(/\/d\/([^/=]+)/)?.[1];
   return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1200` : "";
+}
+
+const KNOWN_DRIVE_MAP: Record<string, string> = {
+  "1TSZrdT2xXpZj6D8_t9PGhu1dSamBNr7C": "/founder_timfire_wide.jpg",
+  "1GFIv8Ho101udn2IbSiz5Zq8G92XJn2AU": "/team/stevenson.jpg",
+  "1Ssje7WtVFMd8TZxMfrex1S0lKG6p_Wp9": "/team/daniel.jpg",
+};
+
+function resolveLocalPortrait(src?: string, alt?: string): string {
+  const s = (src || "").trim();
+  for (const [driveId, localPath] of Object.entries(KNOWN_DRIVE_MAP)) {
+    if (s.includes(driveId)) return localPath;
+  }
+  const a = (alt || "").toLowerCase();
+  if (a.includes("stevenson") || a.includes("motionverse")) return "/team/stevenson.jpg";
+  if (a.includes("daniel") || a.includes("creative expression")) return "/team/daniel.jpg";
+  if (a.includes("timfire") || a.includes("kenneth timothy")) return "/founder_timfire_wide.jpg";
+  return "";
 }
 
 export function ImageWithFallback({
@@ -19,28 +38,50 @@ export function ImageWithFallback({
   className?: string;
   fallbackClassName?: string;
 }) {
-  const [currentSrc, setCurrentSrc] = useState(src);
+  const localPortrait = resolveLocalPortrait(src, alt);
+  const initialSrc =
+    localPortrait && (!src || src.includes("drive.google.com") || src.includes("googleusercontent.com"))
+      ? localPortrait
+      : src || localPortrait;
+
+  const [currentSrc, setCurrentSrc] = useState(initialSrc);
   const [failed, setFailed] = useState(false);
-  const retrySrc = driveFallback(src);
+  const retrySrc = driveFallback(src || "");
 
   if (failed) {
+    if (localPortrait) {
+      return (
+        <img
+          src={localPortrait}
+          alt={alt}
+          className={className}
+          loading="eager"
+          decoding="async"
+        />
+      );
+    }
     return (
       <div className={`flex items-center justify-center bg-[#180026] text-center text-[10px] uppercase tracking-wider text-pink-200 ${fallbackClassName || className}`}>
-        Image unavailable<br />Check Drive sharing
+        {alt || "KR8 Digitals"}
       </div>
     );
   }
 
   return (
     <img
-      src={currentSrc}
+      src={currentSrc || initialSrc}
       alt={alt}
       className={className}
       loading="eager"
       decoding="async"
       onError={() => {
-        if (retrySrc && currentSrc !== retrySrc) setCurrentSrc(retrySrc);
-        else setFailed(true);
+        if (localPortrait && currentSrc !== localPortrait) {
+          setCurrentSrc(localPortrait);
+        } else if (retrySrc && currentSrc !== retrySrc) {
+          setCurrentSrc(retrySrc);
+        } else {
+          setFailed(true);
+        }
       }}
     />
   );

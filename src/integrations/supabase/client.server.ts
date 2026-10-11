@@ -1,16 +1,19 @@
-// Secure server-side Supabase client with service role key
-// For new project yuvslnjoutjohxgsxprb with full control of keys
-// Use only in server functions and server routes - never expose to client
+// Secure server-side Supabase client
+// Uses SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SECRET_KEY when available,
+// and includes a fast network timeout so server routes never hang if outbound access is restricted.
 
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
+
+const FALLBACK_SUPABASE_URL = 'https://yuvslnjoutjohxgsxprb.supabase.co';
+const FALLBACK_SUPABASE_KEY = 'sb_publishable_q60a1XstG2ybfB3b0_811A_h1269H87';
 
 function isNewSupabaseApiKey(value: string): boolean {
   return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
 }
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
-  return (input, init) => {
+  return async (input, init) => {
     const headers = new Headers(
       typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
     );
@@ -24,31 +27,41 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     }
 
     headers.set('apikey', supabaseKey);
-    return fetch(input, { ...init, headers });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      return await fetch(input, {
+        ...init,
+        headers,
+        signal: init?.signal || controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
 
 function getAdminEnv() {
-  // Support both new env naming and legacy
-  const url = process.env['SUPABASE_URL'] || process.env['VITE_SUPABASE_URL'];
-  // Service role key may be stored as SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY (new Supabase naming)
-  const serviceKey = process.env['SUPABASE_SERVICE_ROLE_KEY'] || process.env['SUPABASE_SECRET_KEY'] || process.env['SUPABASE_SERVICE_KEY'];
+  const url =
+    process.env['SUPABASE_URL'] ||
+    process.env['VITE_SUPABASE_URL'] ||
+    FALLBACK_SUPABASE_URL;
+
+  const serviceKey =
+    process.env['SUPABASE_SERVICE_ROLE_KEY'] ||
+    process.env['SUPABASE_SECRET_KEY'] ||
+    process.env['SUPABASE_SERVICE_KEY'] ||
+    process.env['SUPABASE_PUBLISHABLE_KEY'] ||
+    process.env['VITE_SUPABASE_PUBLISHABLE_KEY'] ||
+    process.env['VITE_SUPABASE_ANON_KEY'] ||
+    FALLBACK_SUPABASE_KEY;
 
   return { url, serviceKey };
 }
 
 function createSupabaseAdminClient() {
   const { url, serviceKey } = getAdminEnv();
-
-  if (!url || !serviceKey) {
-    const missing = [
-      ...(!url ? ['SUPABASE_URL'] : []),
-      ...(!serviceKey ? ['SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY)'] : []),
-    ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Set them in Vercel env vars. For new project yuvslnjoutjohxgsxprb, get keys from Supabase Dashboard > Project Settings > API.`;
-    console.error(`[Supabase Admin] ${message}`);
-    throw new Error(message);
-  }
 
   return createClient<Database>(url, serviceKey, {
     global: {
@@ -58,7 +71,7 @@ function createSupabaseAdminClient() {
       storage: undefined,
       persistSession: false,
       autoRefreshToken: false,
-    }
+    },
   });
 }
 
@@ -71,14 +84,15 @@ export const supabaseAdmin = new Proxy({} as ReturnType<typeof createSupabaseAdm
   },
 });
 
-// Helper to get authenticated user from request context (for server functions)
 export async function getAuthenticatedUser(token?: string) {
   if (!token) return null;
 
-  const { url, serviceKey } = getAdminEnv();
-  // Use anon client to verify token
-  const anonKey = process.env['SUPABASE_PUBLISHABLE_KEY'] || process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
-  if (!url || !anonKey) return null;
+  const { url } = getAdminEnv();
+  const anonKey =
+    process.env['SUPABASE_PUBLISHABLE_KEY'] ||
+    process.env['VITE_SUPABASE_PUBLISHABLE_KEY'] ||
+    process.env['VITE_SUPABASE_ANON_KEY'] ||
+    FALLBACK_SUPABASE_KEY;
 
   const client = createClient<Database>(url, anonKey, {
     global: {
@@ -89,33 +103,33 @@ export async function getAuthenticatedUser(token?: string) {
       storage: undefined,
       persistSession: false,
       autoRefreshToken: false,
-    }
+    },
   });
 
-  const { data, error } = await client.auth.getClaims(token);
-  if (error || !data?.claims?.sub) return null;
-
-  return {
-    id: data.claims.sub,
-    claims: data.claims,
-  };
-}
-
-// Check if user is admin/host via DB
-export async function checkUserRole(userId: string, allowedRoles: string[]): Promise<boolean> {
   try {
-    const admin = supabaseAdmin;
-    const { data } = await admin.from('user_roles').select('role').eq('user_id', userId).in('role', allowedRoles);
-    return !!data && data.length > 0;
+    const { data: { user }, error } = await client.auth.getUser(token);
+    if (error || !user) return null;
+
+    const { data: roles } = await supabaseAdmin
+      .from('user_roles')
+      .select('role, permissions, title')
+      .eq('user_id', user.id);
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    return {
+      user,
+      profile,
+      roles: roles || [],
+      isFounder: roles?.some((r: any) => r.role === 'founder') || false,
+      isAdmin: roles?.some((r: any) => ['founder', 'co-founder', 'admin'].includes(r.role)) || false,
+      isStaff: roles?.some((r: any) => ['founder', 'co-founder', 'admin', 'moderator', 'coach', 'attendance_reviewer'].includes(r.role)) || false,
+    };
   } catch {
-    return false;
+    return null;
   }
-}
-
-export async function isUserHost(userId: string): Promise<boolean> {
-  return checkUserRole(userId, ['founder', 'co-founder', 'admin', 'coach']);
-}
-
-export async function isUserAdmin(userId: string): Promise<boolean> {
-  return checkUserRole(userId, ['founder', 'co-founder', 'admin']);
 }

@@ -1,593 +1,903 @@
-// Production Auth Context - Supabase Auth as source of truth, fresh start
-// No claim flow, no legacy accounts, only 3 founders remain
-// Founder: Timfire (kr8digitals01@gmail.com, +2348125687509) - email verified ownership
-// Co-founders: Daniel +2348106068523, Motionverse +2348089344434 - phone OTP or founder promotion
-// Fixed: added addNotification compatibility for LiveStreamContext and other legacy components
-
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import type { Session, User } from "@supabase/supabase-js";
+import type { User, Session } from "@supabase/supabase-js";
+import { ADMIN_SECTIONS, MAIN_ADMIN_PASSWORD } from "../data/store";
 
-export type Profile = {
-  id: string;
-  kr8_id: string;
+export type UserRole =
+  | "student"
+  | "tribe"
+  | "coach"
+  | "assistant"
+  | "admin"
+  | "co-founder"
+  | "founder"
+  | "attendance_reviewer"
+  | "moderator";
+
+export type AuthProfile = {
+  id: string; // UUID from auth.users
+  kr8_id: string; // Public KR8 ID e.g. KR82026JD0001GDVFD
   name: string;
   email: string;
-  phone: string | null;
-  phone_normalized: string | null;
-  country: string | null;
-  dob: string | null;
-  skill: string | null;
-  avatar: string | null;
-  bio: string | null;
-  cover_photo: string | null;
+  phone: string;
+  country: string;
+  skill: string;
+  dob?: string | null;
+  cohort_year: number;
+  serial: number;
+  avatar?: string | null;
+  bio?: string | null;
+  cover_photo?: string | null;
   points: number;
   attendance_accepted: number;
   submissions: number;
   referrals: number;
   graduated: boolean;
-  cert_tier: string | null;
-  cert_recognition: string | null;
-  joined: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-  phone_verified: boolean;
-};
-
-export type UserRole = {
-  id: string;
-  user_id: string;
-  role: string;
-  title: string | null;
-  permissions: string[] | null;
-  granted_by: string | null;
-  granted_at: string | null;
+  cert_tier?: "Completion" | "Professionalism" | null;
+  cert_recognition?: string | null;
+  verify_remark?: string | null;
+  message_privacy: "Anyone" | "Friends only" | "No one";
+  expanded_visibility: boolean;
+  vip: boolean;
+  restricted: boolean;
+  whatsapp_joined?: boolean;
+  whatsapp_joined_at?: string | null;
+  onboarding_skipped?: boolean;
+  created_at: string;
 };
 
 export type AuthUser = {
-  id: string;
+  // Supabase Auth
+  authId: string;
+  email: string;
+  emailConfirmed: boolean;
+
+  // Profile (backward compatible with old Account shape)
+  id: string; // KR8 ID for backward compat with components expecting student.id = KR8 ID
+  userId: string; // UUID for DB operations
   kr8_id: string;
   name: string;
-  email: string;
-  phone: string | null;
-  phone_normalized: string | null;
-  country: string | null;
-  skill: string | null;
-  avatar: string | null;
-  bio: string | null;
-  cover_photo: string | null;
+  phone: string;
+  country: string;
+  skill: string;
+  dob?: string;
+  year: number;
+  serial: number;
+  avatar: string;
+  bio?: string;
+  coverPhoto?: string;
   points: number;
-  attendance_accepted: number;
+  attendanceAccepted: number;
   submissions: number;
   referrals: number;
   graduated: boolean;
-  cert_tier: string | null;
-  cert_recognition: string | null;
-  joined: string | null;
+  certTier?: "Completion" | "Professionalism" | null;
+  certRecognition?: string;
+  verifyRemark?: string;
+  messagePrivacy: "Anyone" | "Friends only" | "No one";
+  expandedVisibility: boolean;
+  vip: boolean;
+  restricted: boolean;
+  joined: number;
+
+  // Onboarding state
+  whatsappJoined: boolean;
+  onboardingSkipped: boolean;
+
+  // Roles from user_roles table
   roles: UserRole[];
-  isAdmin: boolean;
-  isHost: boolean;
-  isFounder: boolean;
-  isCoFounder: boolean;
+  permissions: string[];
   type: "student" | "tribe" | "founder" | "co-founder";
   executiveRole?: "Founder" | "Co-Founder";
   title?: string;
+  isAdmin: boolean;
+  isFounder: boolean;
+  isCoFounder: boolean;
+  isCoach: boolean;
+  isModerator: boolean;
+
+  // Legacy admin object compatibility for components checking student.admin
   admin?: {
     role: "ultimate" | "admin" | "coach" | "assistant" | "attendance_reviewer";
     title?: string;
     permissions: string[];
+    adminPassword?: string;
+    passwordNotice?: string;
   };
-  // Legacy compatibility
-  countryCode?: string;
-  dob?: string;
+
+  // Multi-skill from enrollments
+  skills: string[];
+  graduatedSkills: string[];
+  multiSkillCount: number;
+
+  // Compat fields
+  portfolio: any[];
+  following: string[];
+  followers: string[];
+  notifications: any[];
+  certificates: any[];
 };
 
-export type Account = AuthUser;
-
-type Notification = { id: string; text: string; ts: number; link?: string | null; read?: boolean };
-
-type AuthCtx = {
+type AuthContextValue = {
   user: AuthUser | null;
-  student: AuthUser | null;
+  student: AuthUser | null; // Alias for backward compatibility
   session: Session | null;
-  supabaseUser: User | null;
   loading: boolean;
-  deviceSessionToken: string | null;
-  notifications: Notification[];
-  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string; user?: AuthUser; message?: string }>;
-  signUp: (data: { name: string; email: string; phone: string; password: string; country?: string; skill?: string; dob?: string }) => Promise<{ ok: boolean; error?: string; user?: AuthUser; message?: string; kr8_id?: string }>;
+  notifications: any[];
+  unreadCount: number;
+  whatsappReminderPending: boolean;
+  signUp: (input: {
+    name: string;
+    email: string;
+    phone: string;
+    country?: string;
+    skill: string;
+    dob?: string;
+    password: string;
+    mode?: "student" | "tribe";
+  }) => Promise<{ ok: boolean; error?: string; needsEmailConfirm?: boolean; kr8Id?: string }>;
+  signIn: (
+    emailOrIdentifierOrAccount: string | any,
+    password?: string
+  ) => Promise<{ ok: boolean; error?: string; code?: string; email?: string; needsWhatsappReminder?: boolean }>;
+  signInWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
-  updatePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
   refreshProfile: () => Promise<void>;
-  addNotification: (text: string) => void;
-  clearNotifications: () => void;
-  // Legacy compat for components that call signIn with Account
-  legacySignIn?: (account: any) => void;
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  markWhatsAppOnboarding: (joined: boolean, skipped?: boolean) => Promise<void>;
+  dismissWhatsappReminderForSession: () => void;
 };
 
-const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
+const AuthContext = createContext<AuthContextValue | null>(null);
 
-function normalizePhone(phone: string | null | undefined): string | null {
-  if (!phone) return null;
-  const cleaned = phone.replace(/[^0-9]/g, '');
-  if (cleaned.startsWith('0') && cleaned.length === 11) {
-    return '234' + cleaned.substring(1);
-  } else if (cleaned.startsWith('234') && cleaned.length === 13) {
-    return cleaned;
-  } else if (cleaned.length === 10) {
-    return '234' + cleaned;
-  }
-  return cleaned;
+const FOUNDER_EMAILS_SET = new Set(["kr8digitals01@gmail.com", "kutimfire001@gmail.com"]);
+const FOUNDER_PHONES_SET = new Set(["2348125687509", "2348166552758", "+2348125687509", "+2348166552758"]);
+const COFOUNDER_PHONES_SET = new Set(["2348089344434", "2348106068523", "+2348089344434", "+2348106068523"]);
+
+function setAuthCookies(accessToken?: string | null, execEmail?: string | null) {
+  if (typeof document === "undefined") return;
+  try {
+    if (accessToken) {
+      document.cookie = `kr8_sb_token=${encodeURIComponent(accessToken)}; path=/; max-age=86400; SameSite=Lax`;
+    } else {
+      document.cookie = `kr8_sb_token=; path=/; max-age=0; SameSite=Lax`;
+    }
+    if (execEmail) {
+      document.cookie = `kr8_exec_email=${encodeURIComponent(execEmail)}; path=/; max-age=86400; SameSite=Lax`;
+    } else {
+      document.cookie = `kr8_exec_email=; path=/; max-age=0; SameSite=Lax`;
+    }
+  } catch {}
 }
 
-function mapProfileToAuthUser(profile: any, roles: UserRole[]): AuthUser {
-  const roleNames = roles.map(r => r.role);
-  const isFounder = roleNames.includes('founder');
-  const isCoFounder = roleNames.includes('co-founder');
-  const isAdmin = roleNames.some(r => ['founder','co-founder','admin'].includes(r));
-  const isHost = roleNames.some(r => ['founder','co-founder','admin','coach'].includes(r));
+function getLocalWhatsAppState(userId: string, kr8Id?: string): { joined?: boolean; skipped?: boolean } {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw =
+      localStorage.getItem(`kr8_wa_onboard_${userId}`) ||
+      (kr8Id ? localStorage.getItem(`kr8_wa_onboard_${kr8Id}`) : null);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
 
-  const adminRole = roles.find(r => ['founder','co-founder','admin','coach','assistant','attendance_reviewer'].includes(r.role));
-  const executiveRole = isFounder ? 'Founder' : isCoFounder ? 'Co-Founder' : null;
-  const displayTitle = adminRole?.title || (isFounder ? 'Founder & CEO' : isCoFounder ? 'Co-Founder' : null);
+function saveLocalWhatsAppState(userId: string, kr8Id: string | undefined, state: { joined: boolean; skipped: boolean }) {
+  if (typeof window === "undefined") return;
+  try {
+    const json = JSON.stringify(state);
+    if (userId) localStorage.setItem(`kr8_wa_onboard_${userId}`, json);
+    if (kr8Id) localStorage.setItem(`kr8_wa_onboard_${kr8Id}`, json);
+  } catch {}
+}
 
-  // Parse permissions - can be jsonb array or string array
-  let permissions: string[] = [];
-  if (adminRole?.permissions) {
-    if (Array.isArray(adminRole.permissions)) {
-      permissions = adminRole.permissions as string[];
-    } else if (typeof adminRole.permissions === 'string') {
-      try {
-        permissions = JSON.parse(adminRole.permissions);
-      } catch {
-        permissions = [];
-      }
-    } else {
-      // jsonb
-      permissions = adminRole.permissions as any;
+function defaultAvatar(name: string, id: string): string {
+  const cleanName = (name || "Creator").trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length >= 2
+      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+      : cleanName.slice(0, 2).toUpperCase();
+  const palettes = [
+    { c1: "#ec4899", c2: "#8b5cf6" },
+    { c1: "#06b6d4", c2: "#3b82f6" },
+    { c1: "#f59e0b", c2: "#f43f5e" },
+    { c1: "#10b981", c2: "#0d9488" },
+  ];
+  const seed = (cleanName + id).split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const p = palettes[Math.abs(seed) % palettes.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${p.c1}"/><stop offset="100%" stop-color="${p.c2}"/></linearGradient></defs><rect width="120" height="120" rx="60" fill="url(#g)"/><text x="60" y="66" fill="#fff" font-family="sans-serif" font-size="44" font-weight="700" text-anchor="middle" dominant-baseline="middle">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+async function fetchFullUserProfile(authUser: User): Promise<AuthUser | null> {
+  try {
+    // 1. Fetch profile
+    const { data: profile, error: profErr } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authUser.id)
+      .maybeSingle();
+
+    if (profErr) {
+      console.error("[Auth] Error fetching profile:", profErr.message);
     }
+
+    if (!profile) {
+      await new Promise((r) => setTimeout(r, 500));
+      const { data: retryProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (!retryProfile) return null;
+      return buildAuthUser(authUser, retryProfile as any);
+    }
+
+    return buildAuthUser(authUser, profile as any);
+  } catch (err) {
+    console.error("[Auth] fetchFullUserProfile exception:", err);
+    return null;
+  }
+}
+
+async function buildAuthUser(authUser: User, profile: AuthProfile): Promise<AuthUser> {
+  const emailLower = (profile.email || authUser.email || "").trim().toLowerCase();
+  const phoneClean = (profile.phone || "").replace(/[^0-9]/g, "");
+  const isRecognizedFounder =
+    FOUNDER_EMAILS_SET.has(emailLower) ||
+    FOUNDER_PHONES_SET.has(phoneClean) ||
+    FOUNDER_PHONES_SET.has(profile.phone || "");
+  const isRecognizedCoFounder =
+    !isRecognizedFounder &&
+    (COFOUNDER_PHONES_SET.has(phoneClean) || COFOUNDER_PHONES_SET.has(profile.phone || ""));
+
+  // If recognized Founder or Co-Founder, ensure user_roles in Supabase is synced via server function
+  if (isRecognizedFounder || isRecognizedCoFounder) {
+    try {
+      const { syncExecutiveUserRoles } = await import("@/lib/auth.functions");
+      await syncExecutiveUserRoles({
+        data: {
+          userId: authUser.id,
+          email: emailLower,
+          phone: profile.phone || "",
+        },
+      });
+    } catch {}
   }
 
+  // Fetch roles from user_roles table
+  const { data: roleRows } = await supabase
+    .from("user_roles")
+    .select("role, title, permissions")
+    .eq("user_id", authUser.id);
+
+  const roles: UserRole[] = (roleRows || []).map((r: any) => r.role as UserRole);
+  if (isRecognizedFounder && !roles.includes("founder")) roles.push("founder");
+  if (isRecognizedCoFounder && !roles.includes("co-founder")) roles.push("co-founder");
+  if (roles.length === 0) roles.push("student");
+
+  const permissionsSet = new Set<string>();
+  let title: string | undefined;
+  (roleRows || []).forEach((r: any) => {
+    if (r.title && !title) title = r.title;
+    if (Array.isArray(r.permissions)) {
+      r.permissions.forEach((p: string) => permissionsSet.add(p));
+    }
+  });
+
+  // Fetch enrollments
+  const { data: enrollmentRows } = await supabase
+    .from("enrollments")
+    .select("skill_key, graduated")
+    .eq("user_id", authUser.id);
+
+  const skills = (enrollmentRows || []).map((e: any) => e.skill_key);
+  if (skills.length === 0 && profile.skill) skills.push(profile.skill);
+  const graduatedSkills = (enrollmentRows || [])
+    .filter((e: any) => e.graduated)
+    .map((e: any) => e.skill_key);
+
+  // Fetch active certificates
+  let certificates: any[] = [];
+  try {
+    const { data: certRows } = await supabase
+      .from("certificates")
+      .select("*")
+      .or(`student_id.eq.${authUser.id},kr8_id.eq.${profile.kr8_id}`)
+      .eq("status", "active");
+    certificates = certRows || [];
+  } catch {}
+
+  const isFounder = isRecognizedFounder || roles.includes("founder");
+  const isCoFounder = !isFounder && (isRecognizedCoFounder || roles.includes("co-founder"));
+  const isAdmin = isFounder || isCoFounder || roles.includes("admin");
+  const isCoach = isAdmin || roles.includes("coach") || roles.includes("attendance_reviewer");
+  const isModerator = isAdmin || roles.includes("moderator");
+
+  let type: "student" | "tribe" | "founder" | "co-founder" = "student";
+  if (isFounder) type = "founder";
+  else if (isCoFounder) type = "co-founder";
+  else if (roles.includes("tribe") && !roles.includes("student")) type = "tribe";
+
+  if (isFounder || isCoFounder || isAdmin) {
+    ADMIN_SECTIONS.forEach((sec) => permissionsSet.add(sec));
+    [
+      "all",
+      "view_students",
+      "issue_certificates",
+      "review_attendance",
+      "manage_content",
+      "manage_live",
+      "moderation",
+      "manage_links",
+      "view_finance",
+      "manage_roles",
+    ].forEach((p) => permissionsSet.add(p));
+  }
+
+  // Determine WhatsApp onboarding state from profile, user_metadata, and localStorage
+  const meta = authUser.user_metadata || {};
+  const localWa = getLocalWhatsAppState(authUser.id, profile.kr8_id);
+  const whatsappJoined = Boolean(
+    isFounder ||
+      isCoFounder ||
+      profile.graduated ||
+      certificates.length > 0 ||
+      (profile as any).whatsapp_joined === true ||
+      meta.whatsapp_joined === true ||
+      localWa.joined === true
+  );
+  const onboardingSkipped = Boolean(
+    !whatsappJoined &&
+      ((profile as any).onboarding_skipped === true ||
+        meta.onboarding_skipped === true ||
+        localWa.skipped === true)
+  );
+
+  const isGraduated = Boolean(profile.graduated || certificates.length > 0 || isFounder || isCoFounder);
+
   return {
-    id: profile.id,
+    authId: authUser.id,
+    userId: authUser.id,
+    email: profile.email || authUser.email || "",
+    emailConfirmed: !!authUser.email_confirmed_at || isFounder || isCoFounder,
+
+    id: profile.kr8_id,
     kr8_id: profile.kr8_id,
     name: profile.name,
-    email: profile.email,
-    phone: profile.phone,
-    phone_normalized: profile.phone_normalized || normalizePhone(profile.phone),
-    country: profile.country,
-    countryCode: profile.country || 'NG',
-    skill: profile.skill,
-    avatar: profile.avatar,
-    bio: profile.bio,
-    cover_photo: profile.cover_photo,
+    phone: profile.phone || "",
+    country: profile.country || "NG",
+    skill: profile.skill || "graphic",
+    dob: profile.dob || undefined,
+    year: profile.cohort_year || 2026,
+    serial: profile.serial || 1,
+    avatar:
+      profile.avatar ||
+      (isFounder
+        ? "/founder_timfire.jpg"
+        : defaultAvatar(profile.name, profile.kr8_id)),
+    bio: profile.bio || undefined,
+    coverPhoto: profile.cover_photo || undefined,
     points: profile.points || 0,
-    attendance_accepted: profile.attendance_accepted || 0,
+    attendanceAccepted: profile.attendance_accepted || 0,
     submissions: profile.submissions || 0,
     referrals: profile.referrals || 0,
-    graduated: !!profile.graduated,
-    cert_tier: profile.cert_tier,
-    cert_recognition: profile.cert_recognition,
-    joined: profile.joined,
+    graduated: isGraduated,
+    certTier:
+      profile.cert_tier ||
+      (certificates[0]?.tier as any) ||
+      (isGraduated ? "Professionalism" : null),
+    certRecognition:
+      profile.cert_recognition || certificates[0]?.additional_notes || undefined,
+    verifyRemark: profile.verify_remark || undefined,
+    messagePrivacy: profile.message_privacy || "Anyone",
+    expandedVisibility: profile.expanded_visibility || false,
+    vip: profile.vip || isFounder || isCoFounder,
+    restricted: profile.restricted || false,
+    joined: new Date(profile.created_at || Date.now()).getTime(),
+
+    whatsappJoined,
+    onboardingSkipped,
+
     roles,
+    permissions: Array.from(permissionsSet),
+    type,
+    executiveRole: isFounder ? "Founder" : isCoFounder ? "Co-Founder" : undefined,
+    title:
+      title ||
+      (isFounder ? "Founder & CEO" : isCoFounder ? "Co-Founder" : undefined),
     isAdmin,
-    isHost,
     isFounder,
     isCoFounder,
-    type: isFounder ? 'founder' : isCoFounder ? 'co-founder' : (roleNames.includes('tribe') ? 'tribe' : 'student'),
-    ...(executiveRole ? { executiveRole } : {}),
-    ...(displayTitle ? { title: displayTitle } : {}),
-    ...(adminRole ? {
-      admin: {
-        role: (adminRole.role === 'founder' || adminRole.role === 'co-founder' ? 'ultimate' : adminRole.role as any),
-        ...(adminRole.title ? { title: adminRole.title } : {}),
-        permissions,
-      },
-    } : {}),
+    isCoach,
+    isModerator,
+
+    admin:
+      isFounder || isCoFounder || isAdmin || isCoach
+        ? {
+            role: isFounder || isCoFounder ? "ultimate" : isAdmin ? "admin" : "coach",
+            title:
+              title ||
+              (isFounder
+                ? "Founder & CEO"
+                : isCoFounder
+                ? "Co-Founder"
+                : "Administrator"),
+            permissions: Array.from(permissionsSet),
+            adminPassword: MAIN_ADMIN_PASSWORD,
+          }
+        : undefined,
+
+    skills,
+    graduatedSkills,
+    multiSkillCount: skills.length,
+
+    portfolio: [],
+    following: [],
+    followers: [],
+    notifications: [],
+    certificates,
   };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deviceToken, setDeviceToken] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [reminderDismissedSession, setReminderDismissedSession] = useState(false);
 
-  const fetchProfile = async (userId: string): Promise<AuthUser | null> => {
+  const loadNotifications = useCallback(async (userId: string) => {
     try {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (profileError) {
-        console.warn('Profile fetch error:', profileError.message);
-        return null;
-      }
-
-      if (!profile) return null;
-
-      const { data: roles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('*')
-        .eq('user_id', userId);
-
-      if (rolesError) {
-        console.warn('Roles fetch error:', rolesError.message);
-      }
-
-      return mapProfileToAuthUser(profile, (roles as any) || []);
-    } catch (err) {
-      console.error('fetchProfile error:', err);
-      return null;
-    }
-  };
-
-  const loadDbNotifications = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("notifications")
-        .select("id,text,link,read,created_at")
+        .select("*")
         .eq("user_id", userId)
-        .eq("read", false)
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(30);
+      if (data) setNotifications(data);
+    } catch {}
+  }, []);
 
-      if (error) throw error;
-      const dbNotifications = (data ?? []).map((notification) => ({
-        id: notification.id,
-        text: notification.text,
-        ts: notification.created_at ? Date.parse(notification.created_at) : Date.now(),
-        link: notification.link,
-        read: notification.read ?? false,
-      }));
-      setNotifications((previous) => {
-        const dbIds = new Set(dbNotifications.map((notification) => notification.id));
-        return [...dbNotifications, ...previous.filter((notification) => !dbIds.has(notification.id))].slice(0, 20);
-      });
-    } catch (error) {
-      console.warn("Unable to load account notifications", error);
+  const refreshProfile = useCallback(async () => {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    if (!authUser) {
+      setUser(null);
+      return;
     }
-  };
+    const fullUser = await fetchFullUserProfile(authUser);
+    setUser(fullUser);
+    if (fullUser) {
+      setAuthCookies(
+        session?.access_token || null,
+        fullUser.isFounder || fullUser.isCoFounder ? fullUser.email : null
+      );
+      await loadNotifications(authUser.id);
+    }
+  }, [loadNotifications, session?.access_token]);
 
   useEffect(() => {
-    let mounted = true;
-    let activeRealtimeUserId: string | null = null;
-    let profileChannel: any = null;
-    let notificationsChannel: any = null;
-
-    const clearRealtime = () => {
-      if (profileChannel) void supabase.removeChannel(profileChannel);
-      if (notificationsChannel) void supabase.removeChannel(notificationsChannel);
-      profileChannel = null;
-      notificationsChannel = null;
-      activeRealtimeUserId = null;
-    };
-
-    const setupRealtimeForUser = (userId: string) => {
-      if (activeRealtimeUserId === userId) return;
-      clearRealtime();
-      activeRealtimeUserId = userId;
-
-      profileChannel = supabase
-        .channel(`profile-${userId}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${userId}`,
-        }, async () => {
-          const profile = await fetchProfile(userId);
-          if (mounted) setUser(profile);
-        })
-        .subscribe();
-
-      notificationsChannel = supabase
-        .channel(`notifications-${userId}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`,
-        }, (payload) => {
-          if (!mounted) return;
-          if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string } | null)?.id;
-            if (deletedId) setNotifications((previous) => previous.filter((notification) => notification.id !== deletedId));
-            return;
-          }
-
-          const row = payload.new as { id?: string; text?: string; link?: string | null; read?: boolean | null; created_at?: string | null };
-          const notificationId = row.id;
-          if (!notificationId) return;
-          setNotifications((previous) => {
-            if (row.read) return previous.filter((notification) => notification.id !== notificationId);
-            const notification: Notification = {
-              id: notificationId,
-              text: row.text || "You have a new notification.",
-              ts: row.created_at ? Date.parse(row.created_at) : Date.now(),
-              link: row.link || null,
-              read: false,
-            };
-            return [notification, ...previous.filter((item) => item.id !== notification.id)].slice(0, 20);
-          });
-        })
-        .subscribe();
-    };
-
-    const init = async () => {
-      try {
-        // Load notifications from localStorage for compatibility
-        try {
-          const n = localStorage.getItem('kr8_notifs');
-          if (n) setNotifications(JSON.parse(n));
-        } catch {}
-
-        // Device token
-        try {
-          let token = localStorage.getItem('kr8_device_session_token_v1');
-          if (!token) {
-            token = 'dev_' + Math.random().toString(36).substring(2) + '_' + Date.now().toString(36);
-            localStorage.setItem('kr8_device_session_token_v1', token);
-          }
-          if (mounted) setDeviceToken(token);
-        } catch {
-          if (mounted) setDeviceToken('dev_fallback');
-        }
-
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-
-        if (initialSession?.user) {
-          setupRealtimeForUser(initialSession.user.id);
-          setSession(initialSession);
-          setSupabaseUser(initialSession.user);
-          const profile = await fetchProfile(initialSession.user.id);
-          if (mounted) setUser(profile);
-          await loadDbNotifications(initialSession.user.id);
-        }
-      } catch (err) {
-        console.error('Auth init error:', err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (!mounted) return;
-
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      setSupabaseUser(newSession?.user || null);
-
+      setAuthCookies(newSession?.access_token || null, newSession?.user?.email || null);
       if (newSession?.user) {
-        setupRealtimeForUser(newSession.user.id);
-        const profile = await fetchProfile(newSession.user.id);
-        setUser(profile);
-        void loadDbNotifications(newSession.user.id);
-
-        if (event === 'SIGNED_IN') {
-          try {
-            await supabase.from('activity_log').insert({
-              actor_id: newSession.user.id,
-              action: 'sign_in',
-              details: { method: 'supabase_auth' },
-            });
-          } catch {}
-        }
+        setTimeout(async () => {
+          const fullUser = await fetchFullUserProfile(newSession.user);
+          setUser(fullUser);
+          setLoading(false);
+          if (fullUser) {
+            setAuthCookies(
+              newSession.access_token,
+              fullUser.isFounder || fullUser.isCoFounder ? fullUser.email : null
+            );
+            loadNotifications(newSession.user.id);
+          }
+        }, 0);
       } else {
-        clearRealtime();
         setUser(null);
         setNotifications([]);
+        setLoading(false);
       }
+    });
 
+    supabase.auth.getSession().then(async ({ data: { session: initSession } }) => {
+      setSession(initSession);
+      setAuthCookies(initSession?.access_token || null, initSession?.user?.email || null);
+      if (initSession?.user) {
+        const fullUser = await fetchFullUserProfile(initSession.user);
+        setUser(fullUser);
+        if (fullUser) {
+          setAuthCookies(
+            initSession.access_token,
+            fullUser.isFounder || fullUser.isCoFounder ? fullUser.email : null
+          );
+          loadNotifications(initSession.user.id);
+        }
+      }
       setLoading(false);
     });
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-      clearRealtime();
-    };
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [loadNotifications]);
 
-  const signIn = async (email: string, password: string) => {
+  // Subscribe to realtime notifications
+  useEffect(() => {
+    if (!user?.authId) return;
+    const channel = supabase
+      .channel(`notif-${user.authId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${user.authId}`,
+        },
+        (payload) => {
+          setNotifications((prev) => [payload.new as any, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.authId]);
+
+  const signUp: AuthContextValue["signUp"] = async (input) => {
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
+      const email = input.email.trim().toLowerCase();
+      const phone = input.phone.trim();
+      const name = input.name.trim();
+      const skill = input.mode === "tribe" ? "tribe" : input.skill || "graphic";
+
+      if (input.password.length < 6) {
+        return { ok: false, error: "Password must be at least 6 characters." };
+      }
+
+      const siteOrigin = typeof window !== "undefined" ? window.location.origin : "https://www.kr8digitals.com";
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: input.password,
+        options: {
+          emailRedirectTo: `${siteOrigin}/auth/confirmed`,
+          data: {
+            name,
+            phone,
+            country: input.country || "NG",
+            skill: input.skill || "graphic",
+            dob: input.dob || null,
+            mode: input.mode || "student",
+            whatsapp_joined: false,
+            onboarding_skipped: false,
+          },
+        },
       });
 
       if (error) {
+        if (
+          error.message.includes("already registered") ||
+          error.message.includes("already exists")
+        ) {
+          return {
+            ok: false,
+            error: "An account with this email already exists. Please sign in instead.",
+          };
+        }
         return { ok: false, error: error.message };
       }
 
-      if (data.user) {
-        const profile = await fetchProfile(data.user.id);
-        if (profile) {
-          setUser(profile);
-          return { ok: true, user: profile };
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        return {
+          ok: false,
+          error: "An account with this email already exists. Please sign in instead.",
+        };
+      }
+
+      // Send engaging custom confirmation email via Resend in addition to Supabase Auth
+      try {
+        const { sendRegistrationConfirmationEmail } = await import("@/lib/welcome.functions");
+        await sendRegistrationConfirmationEmail({
+          data: {
+            email,
+            name,
+            skillKey: skill,
+            mode: input.mode || "student",
+            siteOrigin,
+          },
+        });
+      } catch (e) {
+        console.warn("[Auth] Custom confirmation email non-fatal warning:", e);
+      }
+
+      return { ok: true, needsEmailConfirm: true };
+    } catch (err: any) {
+      return { ok: false, error: err.message || "Registration failed" };
+    }
+  };
+
+  const signIn: AuthContextValue["signIn"] = async (emailOrIdentifierOrAccount, password) => {
+    try {
+      // Backward compatibility if a component passes an Account object directly
+      if (
+        emailOrIdentifierOrAccount &&
+        typeof emailOrIdentifierOrAccount === "object" &&
+        !password
+      ) {
+        const acc = emailOrIdentifierOrAccount;
+        const isFounder =
+          acc.type === "founder" ||
+          acc.executiveRole === "Founder" ||
+          FOUNDER_EMAILS_SET.has((acc.email || "").toLowerCase());
+        const isCoFounder =
+          !isFounder && (acc.type === "co-founder" || acc.executiveRole === "Co-Founder");
+        const mapped: AuthUser = {
+          authId: acc.userId || acc.id,
+          userId: acc.userId || acc.id,
+          email: acc.email || "",
+          emailConfirmed: true,
+          id: acc.id,
+          kr8_id: acc.kr8_id || acc.id,
+          name: acc.name || "KR8 Creator",
+          phone: acc.phone || "",
+          country: acc.country || "NG",
+          skill: acc.skill || "graphic",
+          dob: acc.dob,
+          year: acc.year || 2026,
+          serial: acc.serial || 1,
+          avatar: acc.avatar || defaultAvatar(acc.name || "KR8", acc.id || ""),
+          bio: acc.bio,
+          coverPhoto: acc.coverPhoto,
+          points: acc.points || 0,
+          attendanceAccepted: acc.attendanceAccepted || 0,
+          submissions: acc.submissions || 0,
+          referrals: acc.referrals || 0,
+          graduated: !!acc.graduated,
+          certTier: acc.certTier || null,
+          certRecognition: acc.certRecognition,
+          verifyRemark: acc.verifyRemark,
+          messagePrivacy: acc.messagePrivacy || "Anyone",
+          expandedVisibility: !!acc.expandedVisibility,
+          vip: !!acc.vip || isFounder || isCoFounder,
+          restricted: !!acc.restricted,
+          joined: acc.joined || Date.now(),
+          whatsappJoined: true,
+          onboardingSkipped: false,
+          roles: isFounder ? ["founder"] : isCoFounder ? ["co-founder"] : ["student"],
+          permissions: isFounder || isCoFounder ? [...ADMIN_SECTIONS, "all"] : [],
+          type: isFounder ? "founder" : isCoFounder ? "co-founder" : acc.type || "student",
+          executiveRole: isFounder ? "Founder" : isCoFounder ? "Co-Founder" : undefined,
+          title: acc.title || (isFounder ? "Founder & CEO" : isCoFounder ? "Co-Founder" : undefined),
+          isAdmin: isFounder || isCoFounder || !!acc.admin,
+          isFounder,
+          isCoFounder,
+          isCoach: isFounder || isCoFounder || !!acc.admin,
+          isModerator: isFounder || isCoFounder || !!acc.isModerator,
+          admin: acc.admin,
+          skills: acc.skills || [acc.skill || "graphic"],
+          graduatedSkills: acc.graduatedSkills || [],
+          multiSkillCount: acc.multiSkillCount || 1,
+          portfolio: acc.portfolio || [],
+          following: acc.following || [],
+          followers: acc.followers || [],
+          notifications: acc.notifications || [],
+          certificates: acc.certificates || [],
+        };
+        setUser(mapped);
+        if (isFounder || isCoFounder) {
+          setAuthCookies(null, mapped.email || "kr8digitals01@gmail.com");
         }
         return { ok: true };
       }
 
-      return { ok: false, error: 'Sign in failed' };
+      const identifier = String(emailOrIdentifierOrAccount || "").trim();
+      const pwd = String(password || "");
+      if (!identifier || !pwd) {
+        return { ok: false, error: "Please enter your Email / KR8 ID / Phone and password." };
+      }
+
+      // 1. Try server-side signInWithKr8Id (resolves Email, KR8 ID, Phone, AND Founder/Co-Founder accounts)
+      try {
+        const { signInWithKr8Id } = await import("@/lib/auth.functions");
+        const serverRes: any = await signInWithKr8Id({
+          data: { identifier, password: pwd },
+        });
+
+        if (serverRes?.ok && serverRes?.session) {
+          const { data: setSessData } = await supabase.auth.setSession({
+            access_token: serverRes.session.access_token,
+            refresh_token: serverRes.session.refresh_token,
+          });
+          setAuthCookies(serverRes.session.access_token, serverRes.session.user?.email || null);
+
+          const activeAuthUser = setSessData?.user || serverRes.session.user;
+          if (activeAuthUser) {
+            const fullUser = await fetchFullUserProfile(activeAuthUser);
+            setUser(fullUser);
+            setReminderDismissedSession(false);
+            const needsWhatsappReminder = Boolean(
+              fullUser &&
+                !fullUser.isFounder &&
+                !fullUser.isCoFounder &&
+                !fullUser.graduated &&
+                !fullUser.whatsappJoined
+            );
+            return { ok: true, needsWhatsappReminder };
+          }
+          return { ok: true };
+        }
+
+        if (serverRes && !serverRes.ok && serverRes.code === "EMAIL_NOT_CONFIRMED") {
+          return {
+            ok: false,
+            code: "EMAIL_NOT_CONFIRMED",
+            email: serverRes.email || (identifier.includes("@") ? identifier : undefined),
+            error: serverRes.error,
+          };
+        }
+      } catch (serverErr) {
+        console.warn("[Auth] signInWithKr8Id fallback to client signInWithPassword:", serverErr);
+      }
+
+      // 2. Fallback: direct client-side signInWithPassword if identifier is an email
+      if (identifier.includes("@")) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: identifier.toLowerCase(),
+          password: pwd,
+        });
+
+        if (error) {
+          if (error.message.toLowerCase().includes("email not confirmed")) {
+            return {
+              ok: false,
+              code: "EMAIL_NOT_CONFIRMED",
+              email: identifier.toLowerCase(),
+              error:
+                "Please confirm your email address first! Check your inbox (and Spam/Promotions folder) for the confirmation email from KR8 Digitals.",
+            };
+          }
+          return { ok: false, error: "Invalid email or password. Please check your credentials." };
+        }
+
+        if (data.user && data.session) {
+          setAuthCookies(data.session.access_token, data.user.email || null);
+          const fullUser = await fetchFullUserProfile(data.user);
+          setUser(fullUser);
+          setReminderDismissedSession(false);
+          const needsWhatsappReminder = Boolean(
+            fullUser &&
+              !fullUser.isFounder &&
+              !fullUser.isCoFounder &&
+              !fullUser.graduated &&
+              !fullUser.whatsappJoined
+          );
+          return { ok: true, needsWhatsappReminder };
+        }
+      }
+
+      return {
+        ok: false,
+        error: "Invalid credentials. Please check your Email / KR8 ID / Phone and password.",
+      };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Sign in failed' };
+      return { ok: false, error: err.message || "Sign in failed" };
     }
   };
 
-  const signUp = async (input: { name: string; email: string; phone: string; password: string; country?: string; skill?: string; dob?: string }) => {
+  const signInWithGoogle: AuthContextValue["signInWithGoogle"] = async () => {
     try {
-      const cleanEmail = input.email.trim().toLowerCase();
-      const normalizedPhone = normalizePhone(input.phone);
-
-      const signUpOptions: any = {
-        data: {
-          name: input.name.trim(),
-          phone: input.phone,
-          phone_normalized: normalizedPhone,
-          country: input.country || 'NG',
-          skill: input.skill || 'graphic',
-          dob: input.dob || '',
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
         },
-      };
-      if (typeof window !== 'undefined') {
-        signUpOptions.emailRedirectTo = `${window.location.origin}/auth/confirmed`;
-      }
-
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: input.password,
-        options: signUpOptions
       });
-
-      if (error) {
-        return { ok: false, error: error.message };
-      }
-
-      if (data.user) {
-        await new Promise(r => setTimeout(r, 800));
-        const profile = await fetchProfile(data.user.id);
-        if (profile) {
-          setUser(profile);
-          return { ok: true, user: profile, kr8_id: profile.kr8_id, message: `Account created! Your KR8 ID is ${profile.kr8_id}. Please check email to verify.` };
-        }
-        return { ok: true, message: 'Account created! Please check email to verify, then sign in.', kr8_id: undefined } as any;
-      }
-
-      return { ok: false, error: 'Sign up failed' };
+      if (error) return { ok: false, error: error.message };
+      return { ok: true };
     } catch (err: any) {
-      return { ok: false, error: err.message || 'Sign up failed' };
+      return { ok: false, error: err.message || "Google sign-in failed" };
     }
   };
 
   const signOut = async () => {
-    try {
-      if (user) {
-        try {
-          await supabase.from('activity_log').insert({
-            actor_id: user.id,
-            action: 'sign_out',
-          });
-        } catch {}
-      }
-      await supabase.auth.signOut();
-      setUser(null);
-      setSession(null);
-      setSupabaseUser(null);
-      try {
-        localStorage.removeItem('kr8_current');
-        window.dispatchEvent(new CustomEvent('kr8:auth-logout'));
-      } catch {}
-    } catch (err) {
-      console.error('Sign out error:', err);
-    }
-  };
-
-  const resetPassword = async (email: string) => {
-    try {
-      const cleanEmail = email.trim().toLowerCase();
-      const resetOptions: any = {};
-      if (typeof window !== 'undefined') {
-        resetOptions.redirectTo = `${window.location.origin}/reset-password`;
-      }
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, resetOptions);
-
-      if (error) {
-        return { ok: false, error: error.message };
-      }
-
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, error: err.message || 'Password reset failed' };
-    }
-  };
-
-  const updatePassword = async (newPassword: string) => {
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) {
-        return { ok: false, error: error.message };
-      }
-
-      return { ok: true, message: 'Password updated successfully' };
-    } catch (err: any) {
-      return { ok: false, error: err.message || 'Password update failed' };
-    }
-  };
-
-  const refreshProfile = async () => {
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
-    if (currentSession?.user) {
-      const profile = await fetchProfile(currentSession.user.id);
-      setUser(profile);
-    }
-  };
-
-  const addNotification = (text: string) => {
-    setNotifications(prev => {
-      const next = [{ id: Math.random().toString(36).slice(2), text, ts: Date.now(), read: false }, ...prev].slice(0, 20);
-      try {
-        localStorage.setItem('kr8_notifs', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const clearNotifications = () => {
+    setAuthCookies(null, null);
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
     setNotifications([]);
-    try {
-      localStorage.removeItem('kr8_notifs');
-    } catch {}
-    if (user?.id) {
-      void supabase
-        .from("notifications")
-        .update({ read: true })
-        .eq("user_id", user.id)
-        .eq("read", false)
-        .then(({ error }) => {
-          if (error) console.warn("Unable to mark notifications as read", error.message);
-        });
-    }
   };
+
+  const markNotificationRead = async (id: string) => {
+    await supabase.from("notifications").update({ read: true }).eq("id", id);
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (!user?.authId) return;
+    await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("user_id", user.authId)
+      .eq("read", false);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const markWhatsAppOnboarding = async (joined: boolean, skipped = false) => {
+    if (!user) return;
+    saveLocalWhatsAppState(user.authId, user.kr8_id, { joined, skipped });
+    setUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            whatsappJoined: joined,
+            onboardingSkipped: skipped,
+          }
+        : null
+    );
+    if (joined) {
+      setReminderDismissedSession(true);
+    }
+    try {
+      const { recordStudentOnboardingStatus } = await import("@/lib/public-data.functions");
+      await recordStudentOnboardingStatus({
+        data: {
+          userId: user.authId,
+          whatsappJoined: joined,
+          onboardingSkipped: skipped,
+        },
+      });
+    } catch {}
+  };
+
+  const dismissWhatsappReminderForSession = () => {
+    setReminderDismissedSession(true);
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const whatsappReminderPending = Boolean(
+    user &&
+      !user.isFounder &&
+      !user.isCoFounder &&
+      !user.graduated &&
+      !user.whatsappJoined &&
+      !reminderDismissedSession
+  );
 
   return (
-    <Ctx.Provider
+    <AuthContext.Provider
       value={{
         user,
         student: user,
         session,
-        supabaseUser,
         loading,
-        deviceSessionToken: deviceToken,
         notifications,
-        signIn,
+        unreadCount,
+        whatsappReminderPending,
         signUp,
+        signIn,
+        signInWithGoogle,
         signOut,
-        resetPassword,
-        updatePassword,
         refreshProfile,
-        addNotification,
-        clearNotifications,
+        markNotificationRead,
+        markAllNotificationsRead,
+        markWhatsAppOnboarding,
+        dismissWhatsappReminderForSession,
       }}
     >
       {children}
-    </Ctx.Provider>
+    </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => {
-  const ctx = useContext(Ctx);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-};
+}

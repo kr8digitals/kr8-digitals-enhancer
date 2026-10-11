@@ -40,9 +40,27 @@ const DEFAULT_FOUNDERS: FounderProfile[] = [
   { key: "daniel", name: "Daniel (Creative Expression)", role: "Co-Founder · COO · Video Editing & Animation", bio: "Daniel heads up Video Editing & Animation at KR8 Digitals, running his own studio, Creative Expression. From raw footage to polished, scroll-stopping content, he teaches students to edit with intention — not just software skills.", photo: INSTRUCTOR_PHOTOS.daniel },
 ];
 
-const FOUNDERS_KEY = "kr8_founders_v2";
+const FOUNDERS_KEY = "kr8_founders_v5";
+export function sanitizeFounderPhoto(photo?: string, nameOrKey?: string): string {
+  const p = (photo || "").trim();
+  const nk = (nameOrKey || "").toLowerCase();
+  if (p.includes("1GFIv8Ho101udn2IbSiz5Zq8G92XJn2AU") || nk.includes("stevenson") || nk.includes("motionverse")) {
+    return !p || p.includes("drive.google.com") || p.includes("googleusercontent.com") ? "/team/stevenson.jpg" : p;
+  }
+  if (p.includes("1Ssje7WtVFMd8TZxMfrex1S0lKG6p_Wp9") || nk.includes("daniel") || nk.includes("creative expression")) {
+    return !p || p.includes("drive.google.com") || p.includes("googleusercontent.com") ? "/team/daniel.jpg" : p;
+  }
+  if (p.includes("1TSZrdT2xXpZj6D8_t9PGhu1dSamBNr7C") || nk.includes("timfire") || nk.includes("kenneth")) {
+    return !p || p.includes("drive.google.com") || p.includes("googleusercontent.com") ? "/founder_timfire_wide.jpg" : p;
+  }
+  return p || "/founder_timfire_wide.jpg";
+}
 export function getFounders(): FounderProfile[] {
-  return load(FOUNDERS_KEY, DEFAULT_FOUNDERS);
+  const raw = load(FOUNDERS_KEY, DEFAULT_FOUNDERS);
+  return raw.map((f) => ({
+    ...f,
+    photo: sanitizeFounderPhoto(f.photo, `${f.key} ${f.name}`),
+  }));
 }
 export function saveFounders(founders: FounderProfile[]) {
   save(FOUNDERS_KEY, founders);
@@ -82,8 +100,14 @@ const DEFAULT_TEAM: TeamProfile[] = [
     photo: "/team/covenant.png",
   },
 ];
-const TEAM_KEY = "kr8_team_v3";
-export function getTeam(): TeamProfile[] { return load(TEAM_KEY, DEFAULT_TEAM); }
+const TEAM_KEY = "kr8_team_v5";
+export function getTeam(): TeamProfile[] {
+  const raw = load(TEAM_KEY, DEFAULT_TEAM);
+  return raw.map((t) => ({
+    ...t,
+    photo: sanitizeFounderPhoto(t.photo, `${t.key} ${t.name}`),
+  }));
+}
 export function saveTeam(team: TeamProfile[]) {
   save(TEAM_KEY, team);
   if (typeof window !== "undefined") {
@@ -268,11 +292,39 @@ export const CERTIFICATION_CRITERIA: Record<string, string> = {
   marketing: "≥80% live session attendance · real deliverables completed in ≥2 of the 3 final project tracks · a working 1688 account OR live/approved affiliate account OR active bounty promotion (matching chosen tracks) · passing feedback in ≥2 Thursday review sessions · ≥3 Mindset Shift sessions + 1 Monthly Hangout attended · demonstrated honest, professional communication with customers/suppliers.",
 };
 
-const CUSTOM_SKILLS_KEY = "kr8_custom_skills_v4";
-const SKILL_SETTINGS_KEY = "kr8_skill_settings_v4";
-const WAITLIST_WHATSAPP_KEY = "kr8_waitlist_whatsapp_url_v1";
+const CUSTOM_SKILLS_KEY = "kr8_custom_skills_v5";
+const SKILL_SETTINGS_KEY = "kr8_skill_settings_v5";
+const WAITLIST_WHATSAPP_KEY = "kr8_waitlist_whatsapp_url_v2";
 const DYNAMIC_CURRICULA_KEY = "kr8_dynamic_curricula_v1";
-export const DEFAULT_WAITLIST_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU";
+export const OFFICIAL_WHATSAPP_LINKS: Record<string, string> = {
+  graphic: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
+  web: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v?s=cl&p=a&mlu=4&ilr=4",
+  frontend: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v?s=cl&p=a&mlu=4&ilr=4",
+  video: "https://chat.whatsapp.com/C9IyCVi8pWMJJUsErJhQ0M?s=cl&p=a&mlu=4&ilr=4",
+  content_creation: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
+  smm: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
+  marketing: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v?s=cl&p=a&mlu=4&ilr=4",
+  tribe: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
+};
+export const DEFAULT_WAITLIST_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4";
+
+export function normalizeSkillWhatsAppUrl(skillKey: string, url?: string | null): string {
+  const k = (skillKey || "").trim().toLowerCase();
+  const fallback =
+    k.includes("web") || k.includes("front") || k.includes("market")
+      ? OFFICIAL_WHATSAPP_LINKS.web
+      : k.includes("video") || k.includes("anim")
+      ? OFFICIAL_WHATSAPP_LINKS.video
+      : OFFICIAL_WHATSAPP_LINKS[k] || OFFICIAL_WHATSAPP_LINKS.graphic;
+  if (!url || !url.trim() || url.includes("DgnBOEd5CfMHV8CTWgPNLH")) {
+    return fallback;
+  }
+  const u = url.trim();
+  if (u === "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU") return OFFICIAL_WHATSAPP_LINKS.graphic;
+  if (u === "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v") return OFFICIAL_WHATSAPP_LINKS.web;
+  if (u === "https://chat.whatsapp.com/C9IyCVi8pWMJJUsErJhQ0M") return OFFICIAL_WHATSAPP_LINKS.video;
+  return u;
+}
 
 export function getDynamicCurricula(): Record<string, Week[]> {
   return load<Record<string, Week[]>>(DYNAMIC_CURRICULA_KEY, {});
@@ -338,7 +390,7 @@ export function getSkills(): Skill[] {
     return {
       ...s,
       regOpen: setting?.regOpen !== undefined ? setting.regOpen : s.regOpen,
-      whatsapp: setting?.whatsapp !== undefined ? setting.whatsapp : s.whatsapp,
+      whatsapp: normalizeSkillWhatsAppUrl(s.key, setting?.whatsapp !== undefined ? setting.whatsapp : s.whatsapp),
       available: setting?.available !== undefined ? setting.available : s.available,
       curriculum,
       criteria,
@@ -361,7 +413,7 @@ export function getSkill(key?: string): Skill | undefined {
       key: "content",
       name: "Content Creation & Social Media Management",
       suffix: "CCSMVFD",
-      whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU",
+      whatsapp: OFFICIAL_WHATSAPP_LINKS.graphic,
       available: false,
       regOpen: false,
       snippet: "Comprehensive combined track covering content creation and social media management.",
@@ -406,9 +458,9 @@ export function getSkillRegistration(key: string): boolean {
 
 export function getSkillWhatsApp(key: string): string {
   const setting = skillSettings()[key];
-  if (setting?.whatsapp !== undefined) return setting.whatsapp;
+  if (setting?.whatsapp !== undefined) return normalizeSkillWhatsAppUrl(key, setting.whatsapp);
   const s = getSkill(key);
-  return s?.whatsapp ?? "";
+  return normalizeSkillWhatsAppUrl(key, s?.whatsapp);
 }
 
 export function saveSkillSetting(key: string, patch: { regOpen?: boolean; whatsapp?: string; available?: boolean }) {
@@ -3203,11 +3255,11 @@ export const AGENCY_SERVICES = [
 export const PORTFOLIO = [
   {
     id: "p1",
-    title: "AfriSTEM Global",
+    title: "AFRISTEM",
     service: "Website Development",
-    client: "AfriSTEM Global",
+    client: "AFRISTEM",
     description: "Full responsive website designed and developed by KR8 Digitals for science, technology, engineering & mathematics education across Africa.",
-    link: "https://afristemglobal.org",
+    link: "http://afristemglobal.org",
     price: "",
     showPrice: false,
     img: "/portfolio/afristem_hero.jpg",
@@ -3221,7 +3273,7 @@ export const PORTFOLIO = [
     service: "Website Development",
     client: "Prime STEM Nigeria",
     description: "Robotics and STEM initiative empowering Nigerian youth with hands-on coding and technology education — primestemnigeria.afristemglobal.org built by KR8 Digitals.",
-    link: "https://primestemnigeria.afristemglobal.org",
+    link: "http://primestemnigeria.afristemglobal.org",
     price: "",
     showPrice: false,
     img: "/portfolio/afristem_hero.jpg",
@@ -3231,11 +3283,11 @@ export const PORTFOLIO = [
   },
   {
     id: "p3",
-    title: "Chi-Tom Rapha Hospital & Maternity",
+    title: "Chi-Tom Rapha Hospital and Maternity",
     service: "Website Development",
     client: "Chi-Tom Rapha Hospital and Maternity",
     description: "Modern healthcare and maternity website designed and launched by KR8 Digitals, featuring service showcases, patient appointment scheduling, and facility departments.",
-    link: "https://chitomraphahospital.com",
+    link: "http://chitomraphahospital.com",
     price: "",
     showPrice: false,
     img: "/portfolio/chitom_preview.png",
@@ -3249,7 +3301,7 @@ export const PORTFOLIO = [
     service: "Website Development",
     client: "Consistency Drill",
     description: "Personal development and consistency tracking platform — website development by KR8 Digitals, helping users build habits and stay accountable.",
-    link: "https://consistencydrill.com",
+    link: "http://consistencydrill.com",
     price: "",
     showPrice: false,
     img: "/portfolio/afristem_hero.jpg",
@@ -3263,57 +3315,36 @@ export const PORTFOLIO = [
     service: "Complete Branding",
     client: "City Fashion Store",
     description: "Complete branding, visual identity, advertising graphics, and social media creative suite for fashion retail — from logo to storefront to campaign.",
-    link: "/agency",
+    link: "/agency#hire",
     price: "",
     showPrice: false,
     img: "/portfolio/city_fashion.jpg",
-    domain: "kr8digitals.com",
-    placeholder: false,
-  },
-  {
-    id: "p6",
-    title: "Everything for Smart Living",
-    service: "Video Editing",
-    client: "Everything for Smart Living",
-    description: "KR8 Digitals edits the brand's YouTube videos from raw footage to final cut, including UGC advert videos and viral tech reels.",
-    link: "",
-    price: "",
-    showPrice: false,
-    img: IMG.collab,
-    placeholder: false,
-  },
-  {
-    id: "p7",
-    title: "KR8 Academy Platform",
-    service: "Web Engineering",
-    client: "KR8 Digitals",
-    description: "Tuition-free academy platform with verifiable KR8 ID, live drills, XP leaderboard, and QR-verified certificates — built for scale.",
-    link: "/academy",
-    price: "",
-    showPrice: false,
-    img: "/portfolio/kr8_academy.jpg",
-    domain: "kr8digitals.com",
-    previewUrl: "https://www.kr8digitals.com/academy",
+    domain: "City Fashion Store",
     placeholder: false,
   },
 ];
 
 export const FULL_PORTFOLIO_LINK = "/agency";
-export const TRIBE_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU";
+export const TRIBE_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4";
 export function getTribeWhatsApp() {
-  return load("kr8_tribe_link_v1", TRIBE_WHATSAPP);
+  const loaded = load("kr8_tribe_link_v2", TRIBE_WHATSAPP);
+  if (!loaded || loaded.includes("DgnBOEd5CfMHV8CTWgPNLH")) return TRIBE_WHATSAPP;
+  return loaded;
 }
 export function getPortfolio() {
-  const cached = load("kr8_portfolio_v4", null as any);
-  if (cached && Array.isArray(cached) && cached.length >= 7 && cached.some((c:any)=>c.previewUrl)) return cached;
-  // migrate/clear old v3 cache that lacks live previews
+  const cached = load("kr8_portfolio_v6", null as any);
+  if (cached && Array.isArray(cached) && cached.length >= 5) return cached;
   if (typeof window !== "undefined") {
-    try { localStorage.removeItem("kr8_portfolio_v3"); } catch {}
+    try {
+      localStorage.removeItem("kr8_portfolio_v3");
+      localStorage.removeItem("kr8_portfolio_v4");
+      localStorage.removeItem("kr8_portfolio_v5");
+    } catch {}
   }
-  return load("kr8_portfolio_v4", PORTFOLIO);
+  return load("kr8_portfolio_v6", PORTFOLIO);
 }
 export function savePortfolio(items: typeof PORTFOLIO) {
-  save("kr8_portfolio_v4", items);
+  save("kr8_portfolio_v6", items);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("kr8:portfolio-updated"));
     window.dispatchEvent(new Event("storage"));
@@ -5979,4 +6010,273 @@ export function toggleFollowStudent(
   const updatedProfile = getAccountById(currentStudentId) || current;
   return { following: !isFollowing, updatedProfile };
 }
+
+/* ==========================================================================
+   KR8 AI — CONTEXT-AWARE SITE COMPANION & ACCOUNTABILITY COACH
+   ========================================================================== */
+
+export function kr8AiRespond(
+  userPrompt: string,
+  pathname: string = "/",
+  studentContext?: {
+    name?: string;
+    skill?: string;
+    points?: number;
+    graduated?: boolean;
+    attendance?: number;
+    submissions?: number;
+    kr8Id?: string;
+    whatsappJoined?: boolean;
+  }
+): string {
+  const q = (userPrompt || "").trim().toLowerCase();
+  const firstName = studentContext?.name ? studentContext.name.split(" ")[0] : null;
+  const studentSkillName = studentContext?.skill ? getSkillName(studentContext.skill) : null;
+  const studentWaLink = studentContext?.skill ? getSkillWhatsApp(studentContext.skill) : OFFICIAL_WHATSAPP_LINKS.graphic;
+
+  const pageAngleMap: Record<string, string> = {
+    "/": "Ecosystem Guide (Academy · Tribe · Agency)",
+    "/academy": "Academy Mentor & Curriculum Coach",
+    "/register": "Onboarding & Track Selection Advisor",
+    "/register/check-email": "Email Confirmation & Onboarding Guide",
+    "/auth/confirmed": "WhatsApp Learning Group Onboarding Coach",
+    "/welcome/confirmed": "WhatsApp Learning Group Onboarding Coach",
+    "/signin": "Account Access & Recovery Assistant",
+    "/login": "Account Access & Recovery Assistant",
+    "/dashboard": "Personal Accountability & Milestone Strategist",
+    "/agency": "Brand Transformation & Digital Agency Consultant",
+    "/leaderboard": "XP Rankings & Distinction Strategist",
+    "/verify": "Credential & KR8 ID Verification Specialist",
+    "/tribe": "Community & Networking Catalyst",
+    "/about": "Institutional Story & Leadership Guide",
+    "/blog": "Creative Insights & Learning Companion",
+    "/partner": "Strategic Partnership Advisor",
+    "/mindset-shift": "Mindset Shift & Personal Growth Coach",
+    "/live": "Live Masterclass Stage Companion",
+    "/gallery": "Creative Showcase & Portfolio Curator",
+    "/admin": "Executive Operations & Admin Assistant",
+    "/ai": "Full-Spectrum Creative & Technical Mentor",
+  };
+  const currentAngle = pageAngleMap[pathname] || "KR8 Ecosystem Companion & Accountability Coach";
+
+  const accountabilityFooter = firstName
+    ? `\n\n🔥 **Consistency Check for ${firstName}:** ${
+        studentContext?.graduated
+          ? `As a verified KR8 Graduate in **${studentSkillName || "your track"}**, keep sharpening your portfolio, mentoring peers in the Tribe, or unlocking a second skill track!`
+          : `Stay locked in on **${studentSkillName || "your skill track"}** (${studentContext?.points || 0} XP · ${studentContext?.submissions || 0} submissions · ${studentContext?.attendance || 0} classes). Remember: Live classes run **Mon/Wed/Fri 9PM–12AM WAT** and practical assignments run **Tue/Thu/Sat**. Never skip a drill — consistency is what separates learners from paid creators!`
+      }`
+    : `\n\n💡 **KR8 Consistency Rule:** Whether you're learning Graphic Design, Website Development, or Video Editing, showing up to every **Mon/Wed/Fri (9PM–12AM WAT)** class and shipping every **Tue/Thu/Sat** assignment is the fastest path to graduation and paid client work.`;
+
+  // 1. WhatsApp Group Links
+  if (q.includes("whatsapp") || q.includes("group link") || q.includes("join group") || q.includes("learning group")) {
+    return (
+      `Here are the official **KR8 Digitals Learning Group WhatsApp Links**:\n\n` +
+      `• 🎨 **Graphic Design:** ${OFFICIAL_WHATSAPP_LINKS.graphic}\n` +
+      `• 💻 **Website Development:** ${OFFICIAL_WHATSAPP_LINKS.web}\n` +
+      `• 🎬 **Video Editing & Animation:** ${OFFICIAL_WHATSAPP_LINKS.video}\n\n` +
+      (firstName && studentSkillName
+        ? `Since your track is **${studentSkillName}**, your direct learning group link is:\n👉 ${studentWaLink}`
+        : `Note: Make sure you've registered at **/register** and confirmed your email so your KR8 ID is active in the cohort!`) +
+      accountabilityFooter
+    );
+  }
+
+  // 2. Registration, Email Confirmation & Onboarding
+  if (
+    q.includes("register") ||
+    q.includes("sign up") ||
+    q.includes("signup") ||
+    q.includes("enroll") ||
+    q.includes("confirm email") ||
+    q.includes("confirmation") ||
+    q.includes("how to join")
+  ) {
+    return (
+      `**How Registration & Onboarding Works at KR8 Digitals (100% Free):**\n\n` +
+      `1. **Step 1 — Fill the Registration Form (/register):** Choose either *Academy Student (Full 8-Week Cohort)* or *Tribe Member (Community)*, select your skill track, and submit.\n` +
+      `2. **Step 2 — Confirm Your Email (Crucial!):** Right after submitting, check your email inbox (and Spam/Promotions folder) and click the large **Confirm My Email** button. Your registration is only complete once your email is confirmed!\n` +
+      `3. **Step 3 — Join Your WhatsApp Learning Group:** Once confirmed, you'll be taken to your celebration page with a direct button to join your official WhatsApp class group (Graphic Design, Website Development, or Video Editing).\n` +
+      `4. **Step 4 — Access Your Profile & KR8 ID:** Click **Done** (or **Skip** to be reminded on your next login) to enter your Student Dashboard!` +
+      accountabilityFooter
+    );
+  }
+
+  // 3. Login / Sign-In / Locked Out / Password Reset
+  if (q.includes("login") || q.includes("log in") || q.includes("sign in") || q.includes("signin") || q.includes("password") || q.includes("locked")) {
+    return (
+      `**Signing In to Your KR8 Account (/signin):**\n\n` +
+      `• **Email, KR8 ID, or Phone:** You can log in using your registered **Email Address**, your **KR8 ID** (e.g., \`KR82026...\`), or your **Phone Number**.\n` +
+      `• **Unconfirmed Email?** If you registered today and haven't clicked the confirmation button in your email yet, use the **Resend Confirmation Email** option on the Sign In or Check Email page.\n` +
+      `• **Forgot Password?** Switch to the **Lost Password 🔄** tab on **/signin** to request a secure password reset link (1 reset per 30 days, or instant if granted by Admin).` +
+      accountabilityFooter
+    );
+  }
+
+  // 4. Verification & Certificates & Graduated Students
+  if (q.includes("verify") || q.includes("verification") || q.includes("certificate") || q.includes("graduat") || q.includes("credential") || q.includes("kr8 id")) {
+    return (
+      `**KR8 ID & Certificate Verification (/verify):**\n\n` +
+      `• **Live Database Verification:** Every Student KR8 ID (\`KR82026...\`), Certificate Code (\`CERT-KR8-...\`), Tribe ID, and Executive ID verifies in real time on **/verify**.\n` +
+      `• **Two Official Graduation Distinctions:**\n` +
+      `  1. 🏆 **Certificate of Professionalism (Excellence):** Awarded to top-performing graduates who demonstrate exceptional craft, client-ready execution, and consistency (+250 XP on the Leaderboard).\n` +
+      `  2. 🎓 **Certificate of Completion (Completed):** Awarded to graduates who complete the 8-week cohort requirements and hands-on drills (+150 XP on the Leaderboard).\n` +
+      `• **Download & Share:** Graduated students can view, verify via QR code, and download their official PDF/PNG certificates anytime from **/dashboard**, **/academy**, or **/verify**.` +
+      accountabilityFooter
+    );
+  }
+
+  // 5. Agency, Clients, Portfolio & Hiring
+  if (
+    q.includes("agency") ||
+    q.includes("hire") ||
+    q.includes("client") ||
+    q.includes("portfolio") ||
+    q.includes("afristem") ||
+    q.includes("prime stem") ||
+    q.includes("chi-tom") ||
+    q.includes("chitom") ||
+    q.includes("consistency drill") ||
+    q.includes("city fashion") ||
+    q.includes("brand audit")
+  ) {
+    return (
+      `**KR8 Digital Agency — Category-Defining Brand & Web Transformation (/agency):**\n\n` +
+      `We engineer high-converting websites, complete brand identities, and viral video systems. Our live client deployments include:\n` +
+      `• 🌐 **AFRISTEM (Website Development):** http://afristemglobal.org\n` +
+      `• 🌐 **Prime STEM Nigeria (Website Development):** http://primestemnigeria.afristemglobal.org\n` +
+      `• 🌐 **Chi-Tom Rapha Hospital and Maternity (Website Development):** http://chitomraphahospital.com\n` +
+      `• 🌐 **Consistency Drill (Website Development):** http://consistencydrill.com\n` +
+      `• 🎨 **City Fashion Store (Complete Branding):** Full visual identity, storefront, and campaign suite.\n\n` +
+      `On **/agency**, you can preview our Website Development projects in **live desktop homepage mode**, request a project quote, or **Book a Free 20-Minute Brand Audit**!` +
+      accountabilityFooter
+    );
+  }
+
+  // 6. Leaderboard vs Live Feed & Points/XP
+  if (q.includes("leaderboard") || q.includes("rank") || q.includes("points") || q.includes("xp") || q.includes("live feed") || q.includes("score")) {
+    return (
+      `**How the KR8 Leaderboard & Live Feed Work (/leaderboard):**\n\n` +
+      `• **Leaderboard vs. Live Feed:**\n` +
+      `  - **Live Feed** shows the *most recent real-time activities* across KR8 (new registrations, assignment submissions, graduations, and live classes).\n` +
+      `  - **Leaderboard** shows the *official user rankings* connected directly to the database. It displays the **Top 10** creators with a CTA to view the full leaderboard or **type in any KR8 ID** to see that user's exact rank!\n` +
+      `• **How Points Are Calculated from the Database:**\n` +
+      `  - 🏆 **Certificate of Professionalism (Excellence):** +250 XP\n` +
+      `  - 🎓 **Certificate of Completion (Completed):** +150 XP\n` +
+      `  - ⭐ **Good Comments & Team Commendations:** +75 XP bonus per recognition/remark\n` +
+      `  - ⚡ **Double / Multi-Skill Mastery:** +120 XP per additional skill\n` +
+      `  - 📝 **Assignment Submissions:** +25 XP each\n` +
+      `  - ✅ **Class Attendance:** +10 XP each\n` +
+      `  - 🚀 **Real-Time Platform Tasks & Activities:** +15 XP each` +
+      accountabilityFooter
+    );
+  }
+
+  // 7. Founders, Co-Founders, Team & About
+  if (
+    q.includes("founder") ||
+    q.includes("timfire") ||
+    q.includes("kenneth") ||
+    q.includes("stevenson") ||
+    q.includes("daniel") ||
+    q.includes("motionverse") ||
+    q.includes("creative expression") ||
+    q.includes("who created") ||
+    q.includes("about kr8") ||
+    q.includes("team")
+  ) {
+    return (
+      `**KR8 Digitals Leadership & Executive Team (/about):**\n\n` +
+      `• 👑 **Kenneth Timothy Iziogo (Timfire) — Founder & CEO:** Visionary architect of KR8 Digitals and Website Development lead (\`KR8-FOUNDER-TIMFIRE\`). Founded KR8 at Federal University Dutse (FUD) to make high-income digital skills 100% tuition-free.\n` +
+      `• 🎨 **Stevenson (Motionverse) — Co-Founder · Media Director:** Leads Graphic Design & Brand Identity under his studio, Motionverse (\`KR8-COFOUNDER-STEVENSON\`).\n` +
+      `• 🎬 **Daniel (Creative Expression) — Co-Founder · COO:** Heads Video Editing & Animation under his studio, Creative Expression (\`KR8-COFOUNDER-DANIEL\`).\n` +
+      `• 🤝 **Core Team & Partners:** Odobe Nicodemus C (Financial Strategist), Chimnonyerem Mercy (Project Director & Frontend Coach), Nwefuru Favour Chizurum (General Manager), Covenant Afinidi (Accountability Partner), alongside partners **Motionverse**, **CHIGOMA**, and **HIS BATTLE AXE**.` +
+      accountabilityFooter
+    );
+  }
+
+  // 8. Schedule, Timetable, Curriculum & Skills
+  if (
+    q.includes("schedule") ||
+    q.includes("timetable") ||
+    q.includes("time") ||
+    q.includes("when") ||
+    q.includes("class") ||
+    q.includes("course") ||
+    q.includes("skill") ||
+    q.includes("curriculum") ||
+    q.includes("free") ||
+    q.includes("tuition")
+  ) {
+    return (
+      `**KR8 Academy Tracks & Weekly Schedule (/academy):**\n\n` +
+      `• **100% Tuition-Free:** Training, mentorship, graduation, and QR-verified certificates cost **₦0**.\n` +
+      `• **Active Cohort Tracks:** Graphic Design, Website Development, Front-End Development, Video Editing & Animation, Content Creation, Social Media Management, and Digital Marketing.\n` +
+      `• **Weekly Cohort Rhythm (WAT):**\n` +
+      `  - **Mon, Wed, Fri (9:00 PM – 12:00 AM WAT):** Live Practical Classes\n` +
+      `  - **Tue, Thu, Sat (Full Day):** Practical Assignments, Drills & Tutor Reviews\n` +
+      `  - **1st & 3rd Sunday (9:00 PM – 12:00 AM WAT):** Mindset Shift Sessions\n` +
+      `  - **Last Sunday of Month (9:00 PM – 12:00 AM WAT):** All-Tribe Monthly Hangout\n` +
+      `• **Progression Rule:** Master one skill track to graduation first before unlocking a second skill (Double Skill badge + bonus XP!).` +
+      accountabilityFooter
+    );
+  }
+
+  // 9. Specific Technical / Creative Craft Questions (Design, Web, Video, Freelancing, AI)
+  if (q.includes("design") || q.includes("flyer") || q.includes("logo") || q.includes("color") || q.includes("typography") || q.includes("font")) {
+    return (
+      `🎨 **Graphic Design & Brand Craft Advice (${currentAngle}):**\n\n` +
+      `1. **Visual Hierarchy First:** Every strong design has ONE unmistakable focal point (headline or hero subject), a secondary supporting line, and clean whitespace.\n` +
+      `2. **Typography Discipline:** Stick to a maximum of 2 font families — a bold display/sans-serif for headlines and a highly legible sans-serif for body copy.\n` +
+      `3. **60-30-10 Color Rule:** Use 60% dominant background tone, 30% secondary structural color, and 10% high-contrast accent for CTAs.\n` +
+      `4. **Today's Action Drill:** Redesign one local business flyer focusing purely on alignment, contrast, and spacing, then post it in your WhatsApp group for review!` +
+      accountabilityFooter
+    );
+  }
+
+  if (q.includes("website") || q.includes("code") || q.includes("html") || q.includes("css") || q.includes("react") || q.includes("javascript") || q.includes("wordpress")) {
+    return (
+      `💻 **Web Engineering & Conversion Architecture Advice (${currentAngle}):**\n\n` +
+      `1. **Clarity Above the Fold:** Within 3 seconds, a visitor should know *what* the brand does, *who* it's for, and *what button to click next*.\n` +
+      `2. **Mobile-First & Fast:** Use clean semantic sections, responsive grid/flex layouts, and compressed visual assets.\n` +
+      `3. **Real Proof of Work:** Study our live Agency deployments on **/agency** (**AFRISTEM**, **Prime STEM Nigeria**, **Chi-Tom Rapha Hospital**, **Consistency Drill**) to see how real client sites structure navigation, trust badges, and conversion CTAs.` +
+      accountabilityFooter
+    );
+  }
+
+  if (q.includes("video") || q.includes("edit") || q.includes("capcut") || q.includes("premiere") || q.includes("animation") || q.includes("reel")) {
+    return (
+      `🎬 **Video Editing & Retention Storytelling Advice (${currentAngle}):**\n\n` +
+      `1. **The 3-Second Hook:** Open with motion, a bold visual change, or a curiosity-inducing statement in the very first 3 seconds.\n` +
+      `2. **Pattern Interrupts Every 4–6 Seconds:** Use b-roll cuts, subtle zoom keyframes, kinetic captions, or sound risers to keep viewer retention high.\n` +
+      `3. **Clean Audio Wins:** Viewers forgive 1080p video, but they scroll past muddy audio. Balance voiceover clearly above background music.` +
+      accountabilityFooter
+    );
+  }
+
+  // 10. Default Context-Aware Response Based on Current Page
+  return (
+    `👋 **KR8 AI Companion (${currentAngle})**\n\n` +
+    (firstName
+      ? `Hey **${firstName}**! I'm right here with you on **${pathname}**. `
+      : `Welcome to **KR8 Digitals**! You're currently exploring **${pathname}**. `) +
+    `Here is how I can help you right now:\n\n` +
+    `• **Academy & Registration (/register, /academy):** 100% free 8-week cohorts in Graphic Design, Website Development, Video Editing, Front-End Dev, Content Creation, SMM, and Digital Marketing.\n` +
+    `• **WhatsApp Learning Groups:** Instant links for Graphic Design, Website Development, and Video Editing after confirming your email.\n` +
+    `• **ID & Certificate Verification (/verify):** Live database verification for every student ID and graduation certificate.\n` +
+    `• **Leaderboard & Live Feed (/leaderboard):** Real-time Top 10 rankings, KR8 ID rank lookup, and live platform activity feed.\n` +
+    `• **KR8 Agency (/agency):** Live desktop previews of our client websites (**AFRISTEM**, **Prime STEM Nigeria**, **Chi-Tom Rapha Hospital**, **Consistency Drill**) & **City Fashion Store** branding.\n\n` +
+    `Ask me anything — about your coursework, KR8 features, client strategy, or how to stay consistent this week!` +
+    accountabilityFooter
+  );
+}
+
+export function getAllSkillSettings(): Record<SkillKey, SkillSettings> {
+  return getSkillSettings();
+}
+
+export function getActivityFeed(): ActivityItem[] {
+  return getActivity();
+}
+
+
 

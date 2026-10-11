@@ -21,7 +21,7 @@ interface SignInModalProps {
 }
 
 export default function SignInModal({ isOpen, onClose, initialMode = "signin" }: SignInModalProps) {
-  const { signIn, addNotification } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [mode, setMode] = useState<"signin" | "reset">(initialMode);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -64,7 +64,7 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
 
   if (!isOpen) return null;
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
     if (!identifier.trim()) {
@@ -77,18 +77,32 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
     }
 
     setLoading(true);
-    const result = authenticateAccount(identifier, password);
-    setLoading(false);
+    try {
+      const authRes = await signIn(identifier, password);
+      if (authRes.ok) {
+        setLoading(false);
+        onClose();
+        if (authRes.needsWhatsappReminder && typeof window !== "undefined") {
+          window.location.href = "/signin?remind_whatsapp=1";
+        }
+        return;
+      }
 
-    if (!result.ok || !result.account) {
-      setStatusMsg({ type: "error", text: result.error || "Invalid ID or password." });
-      return;
+      // Fallback to local account store if offline
+      const result = authenticateAccount(identifier, password);
+      setLoading(false);
+
+      if (!result.ok || !result.account) {
+        setStatusMsg({ type: "error", text: authRes.error || result.error || "Invalid ID or password." });
+        return;
+      }
+
+      await signIn(result.account);
+      onClose();
+    } catch (err: any) {
+      setLoading(false);
+      setStatusMsg({ type: "error", text: err?.message || "Sign in failed." });
     }
-
-    // Success
-    signIn(result.account);
-    addNotification(`Welcome back, ${result.account.name}!`);
-    onClose();
   };
 
   const handleBiometricSignIn = async (targetId?: string) => {
@@ -103,11 +117,11 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
       const all = getAccounts();
       const account = all.find((a) => a.id.toLowerCase() === res.studentId!.toLowerCase());
       if (!account) {
-        setStatusMsg({ type: "error", text: `Account with ID ${res.studentId} was not found.` });
+        setIdentifier(res.studentId!);
+        setStatusMsg({ type: "info", text: `Passkey verified for ${res.studentId}. Enter your password to complete sign-in.` });
         return;
       }
-      signIn(account);
-      addNotification(`Biometric sign-in verified. Welcome, ${account.name}!`);
+      await signIn(account);
       onClose();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Biometric authentication failed." });
@@ -116,47 +130,15 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
     }
   };
 
-  const handleGooglePrompt = () => {
+  const handleGooglePrompt = async () => {
     setStatusMsg(null);
-    const emailPrompt = prompt("Enter your Google Account email to sign in:")?.trim();
-    if (!emailPrompt) return;
-    const clean = normalizeEmail(emailPrompt);
-    const all = getAccounts();
-    const existing = all.find(
-      (a) =>
-        (a.googleAuth?.enabled && normalizeEmail(a.googleAuth.linkedEmail) === clean) ||
-        normalizeEmail(a.email) === clean
-    );
-
-    if (existing) {
-      if (!existing.googleAuth?.enabled) {
-        setStatusMsg({
-          type: "error",
-          text: `Security Policy: Google Sign-In has not been enabled for this account (${existing.email}). To protect account security, please sign in with your password first, then enable Google Sign-In in your Account Settings.`,
-        });
-        return;
-      }
-
-      if (normalizeEmail(existing.googleAuth.linkedEmail) !== clean) {
-        setStatusMsg({
-          type: "error",
-          text: `Access Denied: The Google account "${clean}" is not linked to this profile.`,
-        });
-        return;
-      }
-
-      signIn(existing);
-      addNotification(`Signed in with verified Google Account as ${existing.name}!`);
-      onClose();
-    } else {
-      setStatusMsg({
-        type: "error",
-        text: `No account registered with ${clean}. Google-only instant signup is not permitted — please complete full registration first.`,
-      });
+    const res = await signInWithGoogle();
+    if (!res.ok) {
+      setStatusMsg({ type: "error", text: res.error || "Google Sign-In failed." });
     }
   };
 
-  const handleRequestResetCode = (e: React.FormEvent) => {
+  const handleRequestResetCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
     if (!resetIdentifier.trim()) {
@@ -165,6 +147,23 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
     }
 
     setLoading(true);
+    if (resetIdentifier.includes("@")) {
+      try {
+        const { requestPasswordResetSecure } = await import("@/lib/auth.functions");
+        const secRes: any = await requestPasswordResetSecure({
+          data: { email: resetIdentifier.trim().toLowerCase() },
+        });
+        setLoading(false);
+        if (secRes?.ok) {
+          setStatusMsg({
+            type: "success",
+            text: secRes.message || "Password reset link sent to your email inbox.",
+          });
+          return;
+        }
+      } catch {}
+    }
+
     const res = requestPasswordReset(resetIdentifier);
     setLoading(false);
 
@@ -174,7 +173,7 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
     }
 
     setGeneratedCode(res.code);
-    setResetCode(res.code); // Auto-fill for friction-free UX
+    setResetCode(res.code);
     setResetStep("verify");
     setStatusMsg({
       type: "success",
@@ -205,7 +204,6 @@ export default function SignInModal({ isOpen, onClose, initialMode = "signin" }:
 
     // Auto-sign in the user
     signIn(res.account);
-    addNotification(`Password updated! You are now logged in as ${res.account.name}.`);
     onClose();
   };
 
