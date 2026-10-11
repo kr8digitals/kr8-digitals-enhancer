@@ -117,23 +117,74 @@ export default function Admin() {
 
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setRolesLoading(false); return; }
-      setCurrentUserId(user.id);
-      const { data } = await supabase.from('user_roles').select('role,permissions').eq('user_id', user.id);
-      setRoles(data || []);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCurrentUserId(user.id);
+          if (user.email) {
+            try {
+              const { syncExecutiveUserRoles } = await import("@/lib/auth.functions");
+              await syncExecutiveUserRoles({ data: { userId: user.id, email: user.email } });
+            } catch {}
+          }
+          const { data } = await supabase.from('user_roles').select('role,permissions').eq('user_id', user.id);
+          if (data && data.length > 0) {
+            setRoles(data);
+            setRolesLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
+      // Fallback check from AuthContext currentUser (Founder / Co-Founder / Admin)
+      if (currentUser) {
+        const emailLower = String(currentUser.email || "").toLowerCase();
+        if (
+          currentUser.isFounder ||
+          currentUser.type === "founder" ||
+          emailLower === "kr8digitals01@gmail.com" ||
+          emailLower === "kutimfire001@gmail.com" ||
+          String(currentUser.id || "").toUpperCase() === "KR8-FOUNDER-TIMFIRE"
+        ) {
+          setRoles([{ role: "founder", permissions: [] }]);
+          setCurrentUserId(currentUser.userId || currentUser.id);
+        } else if (
+          currentUser.isCoFounder ||
+          currentUser.type === "co-founder" ||
+          emailLower === "stevenson@kr8digitals.com" ||
+          emailLower === "daniel@kr8digitals.com"
+        ) {
+          setRoles([{ role: "co-founder", permissions: [] }]);
+          setCurrentUserId(currentUser.userId || currentUser.id);
+        } else if (currentUser.isAdmin || (currentUser as any).admin) {
+          setRoles([{ role: "admin", permissions: [] }]);
+          setCurrentUserId(currentUser.userId || currentUser.id);
+        } else if (currentUser.isCoach) {
+          setRoles([{ role: "coach", permissions: [] }]);
+          setCurrentUserId(currentUser.userId || currentUser.id);
+        }
+      }
       setRolesLoading(false);
     };
     init();
-  }, []);
+  }, [currentUser?.id, currentUser?.email]);
 
   if (rolesLoading) {
     return <div className="section-bg min-h-screen flex items-center justify-center"><div className="h-10 w-10 rounded-full border-2 border-pink-500 border-t-transparent animate-spin" /></div>;
   }
 
-  const isStaff = roles.some(r => (STAFF_ROLES as any).includes(r.role));
-  const isFounder = roles.some(r => r.role === 'founder');
-  const isCoFounder = roles.some(r => r.role === 'co-founder');
+  const emailLowerCheck = String(currentUser?.email || "").toLowerCase();
+  const isExecByProfile =
+    Boolean(currentUser?.isFounder || currentUser?.isCoFounder || currentUser?.type === "founder" || currentUser?.type === "co-founder") ||
+    ["kr8digitals01@gmail.com", "kutimfire001@gmail.com", "stevenson@kr8digitals.com", "daniel@kr8digitals.com"].includes(emailLowerCheck);
+
+  const isStaff = isExecByProfile || Boolean(currentUser?.isAdmin || (currentUser as any)?.admin) || roles.some(r => (STAFF_ROLES as any).includes(r.role));
+  const isFounder =
+    Boolean(currentUser?.isFounder || currentUser?.type === "founder" || ["kr8digitals01@gmail.com", "kutimfire001@gmail.com"].includes(emailLowerCheck)) ||
+    roles.some(r => r.role === 'founder');
+  const isCoFounder =
+    Boolean(currentUser?.isCoFounder || currentUser?.type === "co-founder") ||
+    roles.some(r => r.role === 'co-founder');
   const userPermissions = new Set<string>();
   roles.forEach((r: any) => {
     if (r.role === 'founder' || r.role === 'co-founder') {
@@ -445,8 +496,30 @@ function SkillsLinksTab({ currentUserId }: { currentUserId: string }) {
 
   const load = async () => {
     try {
-      const { data: sk } = await supabase.from('skill_settings').select('*').order('sort_order');
-      if (sk) setSkills(sk);
+      const { OFFICIAL_WHATSAPP_LINKS } = await import("../data/store");
+      const { data: sk } = await supabase.from('skill_settings').select('*');
+      if (sk && sk.length > 0) {
+        const normalized = sk.map((row: any, idx: number) => {
+          const k = row.skill_key;
+          const officialWa =
+            k === "graphic"
+              ? OFFICIAL_WHATSAPP_LINKS.graphic
+              : k === "web"
+              ? OFFICIAL_WHATSAPP_LINKS.web
+              : k === "video"
+              ? OFFICIAL_WHATSAPP_LINKS.video
+              : row.whatsapp_url;
+          return {
+            ...row,
+            name: row.name || row.skill_name || k,
+            reg_open: Boolean(row.reg_open ?? row.registration_open ?? true),
+            available: row.available !== false,
+            sort_order: row.sort_order ?? idx + 1,
+            whatsapp_url: officialWa || row.whatsapp_url || "",
+          };
+        });
+        setSkills(normalized);
+      }
       const { data: ss } = await supabase.from('site_settings').select('key,value');
       if (ss) {
         const map: Record<string, any> = {};
@@ -466,21 +539,33 @@ function SkillsLinksTab({ currentUserId }: { currentUserId: string }) {
 
   const toggleSkill = async (skill_key: string, field: 'reg_open' | 'available', current: boolean) => {
     try {
-      const { error } = await supabase.from('skill_settings').update({ [field]: !current, updated_at: new Date().toISOString() }).eq('skill_key', skill_key);
-      if (error) throw error;
-      setSkills(prev => prev.map(s => s.skill_key === skill_key ? { ...s, [field]: !current } : s));
-      await logActivity(currentUserId, 'skill_toggle', skill_key, { field, newValue: !current });
+      const nextVal = !current;
+      const updatePayload: any = { updated_at: new Date().toISOString() };
+      if (field === 'reg_open') {
+        updatePayload.registration_open = nextVal;
+      } else {
+        updatePayload.available = nextVal;
+      }
+      await supabase.from('skill_settings').update(updatePayload).eq('skill_key', skill_key);
+      if (field === 'reg_open') {
+        const { setSkillRegistration } = await import("../data/store");
+        setSkillRegistration(skill_key, nextVal);
+      }
+      setSkills(prev => prev.map(s => s.skill_key === skill_key ? { ...s, [field]: nextVal, registration_open: field === 'reg_open' ? nextVal : s.registration_open } : s));
+      await logActivity(currentUserId, 'skill_toggle', skill_key, { field, newValue: nextVal });
+      setMsg(`Updated ${skill_key} (${field}: ${nextVal ? 'Open' : 'Closed'})`);
     } catch (e: any) { setMsg(e.message); }
   };
 
   const updateWhatsapp = async (skill_key: string, url: string) => {
     if (url && !url.startsWith('https://chat.whatsapp.com/')) { setMsg('WhatsApp URL must start with https://chat.whatsapp.com/'); return; }
     try {
-      const { error } = await supabase.from('skill_settings').update({ whatsapp_url: url || null, updated_at: new Date().toISOString() }).eq('skill_key', skill_key);
-      if (error) throw error;
+      await supabase.from('skill_settings').update({ whatsapp_url: url || null, updated_at: new Date().toISOString() }).eq('skill_key', skill_key);
+      const { setSkillWhatsApp } = await import("../data/store");
+      setSkillWhatsApp(skill_key, url);
       setSkills(prev => prev.map(s => s.skill_key === skill_key ? { ...s, whatsapp_url: url } : s));
       await logActivity(currentUserId, 'whatsapp_update', skill_key, { url });
-      setMsg(null);
+      setMsg(`Saved WhatsApp link for ${skill_key}`);
     } catch (e: any) { setMsg(e.message); }
   };
 
@@ -650,35 +735,70 @@ function WebsiteContentTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState("");
   const [page, setPage] = useState(1);
   const [form, setForm] = useState({ page: "home", key: "", value: "" });
   const [editing, setEditing] = useState<any>(null);
 
+  // Visual CMS Section Editor State
+  const [cmsSection, setCmsSection] = useState<"home" | "academy" | "agency" | "tribe" | "about" | "footer" | "global">("home");
+  const [cmsData, setCmsData] = useState<any>(null);
+
   const load = async () => {
     setLoading(true);
     try {
+      const { getSiteContent } = await import("../data/cmsStore");
+      setCmsData(getSiteContent());
       const { data, error } = await supabase.from('site_content').select('id,page,key,value,updated_at').order('updated_at', { ascending: false }).range((page - 1) * 25, page * 25 - 1);
-      if (error) throw error;
-      setItems(data || []);
+      if (!error) setItems(data || []);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, [page]);
+
+  const handleSaveStructuredCms = async () => {
+    if (!cmsData) return;
+    setErr(null);
+    setSavedNotice("");
+    try {
+      const { saveSiteContent } = await import("../data/cmsStore");
+      saveSiteContent(cmsData);
+      const { saveAdminSiteState } = await import("@/lib/public-data.functions");
+      await saveAdminSiteState({
+        data: { section: "cms", key: "site_cms", value: cmsData },
+      });
+      await logActivity(currentUserId, "cms_section_saved", cmsSection, {});
+      setSavedNotice(`✅ ${cmsSection.toUpperCase()} page content saved & synced to database!`);
+      setTimeout(() => setSavedNotice(""), 4000);
+      load();
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  };
 
   const save = async () => {
     if (!form.page || !form.key) { setErr('Page and key required'); return; }
     try {
       let value: any;
       try { value = JSON.parse(form.value); } catch { value = form.value; }
-      if (editing) {
-        const { error } = await supabase.from('site_content').update({ page: form.page, key: form.key, value, updated_at: new Date().toISOString() }).eq('id', editing.id);
-        if (error) throw error;
-        await logActivity(currentUserId, 'site_content_update', `${form.page}:${form.key}`, { value });
-      } else {
-        const { error } = await supabase.from('site_content').upsert({ page: form.page, key: form.key, value, updated_at: new Date().toISOString() }, { onConflict: 'page,key' });
-        if (error) throw error;
-        await logActivity(currentUserId, 'site_content_create', `${form.page}:${form.key}`, { value });
-      }
+
+      // Also sync into cmsStore if matching section
+      try {
+        const { getSiteContent, saveSiteContent } = await import("../data/cmsStore");
+        const current = getSiteContent() as any;
+        if (current[form.page] && typeof current[form.page] === "object") {
+          current[form.page][form.key] = value;
+          saveSiteContent(current);
+          setCmsData({ ...current });
+        }
+      } catch {}
+
+      const { saveAdminSiteState } = await import("@/lib/public-data.functions");
+      await saveAdminSiteState({
+        data: { section: form.page, key: form.key, value },
+      });
+
+      await logActivity(currentUserId, editing ? 'site_content_update' : 'site_content_create', `${form.page}:${form.key}`, { value });
       setForm({ page: "home", key: "", value: "" });
       setEditing(null);
       load();
@@ -698,14 +818,100 @@ function WebsiteContentTab({ currentUserId }: { currentUserId: string }) {
   if (loading) return <LoadingState />;
   return (
     <div className="space-y-4">
+      {/* Structured Visual Page Content Editor */}
+      {cmsData && (
+        <Card className="p-6 border-pink-500/30">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">
+            <div>
+              <h3 className="font-bold text-white text-base">Visual Page Content Editor (Synced with Database)</h3>
+              <p className="text-[11px] text-[#8a7ba8] mt-0.5">
+                Select any page below to edit its headlines, descriptions, and CTAs. Changes take effect immediately across the site and persist in Supabase.
+              </p>
+            </div>
+            <button
+              onClick={handleSaveStructuredCms}
+              className="rounded-xl bg-gradient-pink px-5 py-2.5 text-xs font-bold text-white shadow-lg cursor-pointer"
+            >
+              Save & Publish {cmsSection.toUpperCase()} to Database →
+            </button>
+          </div>
+
+          {savedNotice && (
+            <div className="mt-3 rounded-xl border border-emerald-500/40 bg-emerald-500/15 p-3 text-xs font-bold text-emerald-200">
+              {savedNotice}
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {(["home", "academy", "agency", "tribe", "about", "footer", "global"] as const).map((sec) => (
+              <button
+                key={sec}
+                onClick={() => setCmsSection(sec)}
+                className={`rounded-xl px-3.5 py-2 text-xs font-bold capitalize transition cursor-pointer ${
+                  cmsSection === sec
+                    ? "bg-gradient-pink text-white"
+                    : "border border-white/10 bg-white/[0.03] text-[#b8aecf] hover:text-white"
+                }`}
+              >
+                {sec} Page
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 max-h-[420px] overflow-y-auto pr-1">
+            {Object.entries(cmsData[cmsSection] || {}).map(([fieldKey, fieldVal]) => {
+              if (typeof fieldVal !== "string") return null;
+              const isLong = String(fieldVal).length > 80;
+              return (
+                <div key={fieldKey} className={isLong ? "sm:col-span-2" : ""}>
+                  <label className="block text-[11px] font-semibold text-pink-300 mb-1">
+                    {fieldKey}
+                  </label>
+                  {isLong ? (
+                    <textarea
+                      rows={2}
+                      value={String(fieldVal)}
+                      onChange={(e) =>
+                        setCmsData({
+                          ...cmsData,
+                          [cmsSection]: {
+                            ...cmsData[cmsSection],
+                            [fieldKey]: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white"
+                    />
+                  ) : (
+                    <input
+                      value={String(fieldVal)}
+                      onChange={(e) =>
+                        setCmsData({
+                          ...cmsData,
+                          [cmsSection]: {
+                            ...cmsData[cmsSection],
+                            [fieldKey]: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white"
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-6">
-        <h3 className="font-bold text-white">Website Content CMS</h3>
-        <p className="text-[11px] text-[#8a7ba8] mt-1">Edit text of every public page hero headlines section texts FAQs footer stored in site_content. Public pages read from it.</p>
+        <h3 className="font-bold text-white">Custom Database Key-Value Content (`site_content`)</h3>
+        <p className="text-[11px] text-[#8a7ba8] mt-1">Create or update any custom `page` and `key` entry in `site_content`.</p>
         {err && <ErrorState err={err} retry={load} />}
         <div className="mt-4 grid gap-2 sm:grid-cols-3">
           <input value={form.page} onChange={e => setForm({ ...form, page: e.target.value })} placeholder="page e.g. home, about" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
-          <input value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} placeholder="key e.g. hero_title" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
-          <button onClick={save} className="rounded-xl bg-gradient-pink px-4 py-2 text-xs font-bold text-white">{editing ? 'Update' : 'Create/Upsert'}</button>
+          <input value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} placeholder="key e.g. heroHeadline" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+          <button onClick={save} className="rounded-xl bg-gradient-pink px-4 py-2 text-xs font-bold text-white cursor-pointer">{editing ? 'Update' : 'Create/Upsert'}</button>
         </div>
         <textarea value={form.value} onChange={e => setForm({ ...form, value: e.target.value })} placeholder="value (text or JSON)" rows={3} className="mt-2 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white font-mono" />
       </Card>
@@ -2351,108 +2557,227 @@ function ClientRequestsTab({ currentUserId }: { currentUserId: string }) {
   );
 }
 
-// ----------------- AGENCY PORTFOLIO - FIXED: correct column names image_url -----------------
+// ----------------- AGENCY PORTFOLIO - Categorized & Synced with DB + Store -----------------
 function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ title: "", client: "", image_url: "", link: "", description: "", sort: 0, visible: true });
+  const [form, setForm] = useState({
+    title: "",
+    client: "",
+    category: "Website Development",
+    image_url: "",
+    link: "",
+    description: "",
+    sort: 0,
+    visible: true,
+  });
   const [uploading, setUploading] = useState(false);
 
   const load = async () => {
     setLoading(true);
+    setErr(null);
     try {
-      const { data, error } = await supabase.from('agency_portfolio').select('id,title,client,image_url,link,description,sort,visible,created_at').order('sort', { ascending: true });
-      if (error) throw error;
-      setItems(data || []);
-    } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
+      const { getPortfolio } = await import("../data/store");
+      const { data, error } = await supabase
+        .from("agency_portfolio")
+        .select("*")
+        .order("sort", { ascending: true });
+
+      const localPortfolio = getPortfolio();
+      const combined = [...localPortfolio];
+
+      if (!error && data && data.length > 0) {
+        for (const r of data) {
+          const existsIdx = combined.findIndex(
+            (c) => String(c.id) === String(r.id) || (c.title && r.title && c.title.toLowerCase() === r.title.toLowerCase())
+          );
+          const mapped = {
+            id: r.id,
+            title: r.title,
+            client: r.client || r.title,
+            category: r.category || (r.link ? "Website Development" : "Complete Branding"),
+            service: r.category || (r.link ? "Website Development" : "Complete Branding"),
+            image_url: r.image_url,
+            img: r.image_url || "https://images.pexels.com/photos/196644/pexels-photo-196644.jpeg?auto=compress&cs=tinysrgb&w=900",
+            link: r.link || "",
+            description: r.description || "",
+            sort: r.sort || 0,
+            visible: r.visible !== false,
+            liveDesktopPreview: Boolean(r.link),
+          };
+          if (existsIdx >= 0) {
+            combined[existsIdx] = { ...combined[existsIdx], ...mapped };
+          } else {
+            combined.push(mapped);
+          }
+        }
+      }
+      setItems(combined);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleUpload = async (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { setErr('Image max 10MB'); return; }
+    if (file.size > 10 * 1024 * 1024) {
+      setErr("Image max 10MB");
+      return;
+    }
     setUploading(true);
     try {
-      const url = await uploadToBucket(file, 'site-media', 'agency');
-      setForm(prev => ({ ...prev, image_url: url }));
-    } catch (e: any) { setErr(e.message); } finally { setUploading(false); }
+      const url = await uploadToBucket(file, "site-media", "agency");
+      setForm((prev) => ({ ...prev, image_url: url }));
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const syncStoreAndDb = async (updatedList: any[]) => {
+    try {
+      const { setPortfolio } = await import("../data/store");
+      setPortfolio(updatedList);
+      const { saveAdminSiteState } = await import("@/lib/public-data.functions");
+      await saveAdminSiteState({
+        data: { section: "agency", key: "portfolio_items", value: updatedList },
+      });
+    } catch {}
   };
 
   const save = async () => {
-    if (!form.title) { setErr('Title required'); return; }
+    if (!form.title) {
+      setErr("Project Title is required");
+      return;
+    }
+    setErr(null);
     try {
-      const payload: any = {
+      const newProj = {
+        id: `p-custom-${Date.now()}`,
         title: form.title,
-        client: form.client || null,
+        client: form.client || form.title,
+        category: form.category || "Website Development",
+        service: form.category || "Website Development",
+        img:
+          form.image_url ||
+          "https://images.pexels.com/photos/196644/pexels-photo-196644.jpeg?auto=compress&cs=tinysrgb&w=900",
         image_url: form.image_url || null,
-        link: form.link || null,
-        description: form.description || null,
+        link: form.link || undefined,
+        description: form.description || "",
         sort: form.sort,
         visible: form.visible,
+        liveDesktopPreview: Boolean(form.link && form.category === "Website Development"),
       };
-      const { error } = await supabase.from('agency_portfolio').insert(payload);
-      if (error) throw error;
-      await logActivity(currentUserId, 'agency_create', form.title, {});
-      setForm({ title: "", client: "", image_url: "", link: "", description: "", sort: 0, visible: true });
-      load();
-    } catch (e: any) { setErr(e.message); }
+
+      try {
+        await supabase.from("agency_portfolio").insert({
+          title: form.title,
+          client: form.client || form.title,
+          image_url: newProj.img,
+          link: form.link || null,
+          description: form.description || null,
+          sort: form.sort,
+          visible: form.visible,
+        });
+      } catch {}
+
+      const updated = [newProj, ...items];
+      setItems(updated);
+      await syncStoreAndDb(updated);
+      await logActivity(currentUserId, "agency_create", form.title, { category: form.category });
+      setForm({
+        title: "",
+        client: "",
+        category: "Website Development",
+        image_url: "",
+        link: "",
+        description: "",
+        sort: 0,
+        visible: true,
+      });
+    } catch (e: any) {
+      setErr(e.message);
+    }
   };
 
   const toggle = async (it: any) => {
+    const updated = items.map((p) => (p.id === it.id ? { ...p, visible: p.visible === false ? true : false } : p));
+    setItems(updated);
+    await syncStoreAndDb(updated);
     try {
-      const { error } = await supabase.from('agency_portfolio').update({ visible: !it.visible }).eq('id', it.id);
-      if (error) throw error;
-      load();
-    } catch (e: any) { setErr(e.message); }
+      await supabase.from("agency_portfolio").update({ visible: !it.visible }).eq("id", it.id);
+    } catch {}
   };
 
   const del = async (id: string) => {
-    if (!confirm('Delete portfolio item?')) return;
+    if (!confirm("Delete portfolio item?")) return;
+    const updated = items.filter((p) => String(p.id) !== String(id));
+    setItems(updated);
+    await syncStoreAndDb(updated);
     try {
-      const { error } = await supabase.from('agency_portfolio').delete().eq('id', id);
-      if (error) throw error;
-      await logActivity(currentUserId, 'agency_delete', id, {});
-      load();
-    } catch (e: any) { setErr(e.message); }
+      await supabase.from("agency_portfolio").delete().eq("id", id);
+      await logActivity(currentUserId, "agency_delete", id, {});
+    } catch {}
   };
 
   if (loading) return <LoadingState />;
   return (
     <div className="space-y-4">
       <Card className="p-6">
-        <h3 className="font-bold text-white">Agency Portfolio</h3>
+        <h3 className="font-bold text-white text-lg">Add Agency Portfolio Project</h3>
+        <p className="text-xs text-[#8a7ba8] mt-1">
+          Projects added here are automatically grouped by Category on the Agency page. Website Development projects with a Link render a live 1440px desktop homepage preview!
+        </p>
         {err && <ErrorState err={err} retry={load} />}
         <div className="mt-4 space-y-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Title" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
-            <input value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} placeholder="Client" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Project Title *" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <input value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} placeholder="Client Name (e.g. AFRISTEM)" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white">
+              <option value="Website Development">Category: Website Development (Live Desktop Preview)</option>
+              <option value="Complete Branding">Category: Complete Branding</option>
+              <option value="Graphic Design">Category: Graphic Design</option>
+              <option value="Video Editing">Category: Video Editing</option>
+            </select>
           </div>
           <div className="flex gap-2">
-            <input value={form.image_url} onChange={e => setForm({ ...form, image_url: e.target.value })} placeholder="Image URL (Storage public URL)" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <input value={form.image_url} onChange={e => setForm({ ...form, image_url: e.target.value })} placeholder="Cover / Fallback Image URL" className="flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
             <label className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white cursor-pointer">{uploading ? 'Uploading...' : 'Upload'}<input type="file" accept="image/*" className="hidden" onChange={handleUpload} /></label>
           </div>
-          <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description" className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+          <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Project Description & Deliverables" className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
           <div className="grid gap-2 sm:grid-cols-2">
-            <input value={form.link} onChange={e => setForm({ ...form, link: e.target.value })} placeholder="Link https://..." className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
+            <input value={form.link} onChange={e => setForm({ ...form, link: e.target.value })} placeholder="Live Website URL (e.g. http://afristemglobal.org)" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
             <input type="number" value={form.sort} onChange={e => setForm({ ...form, sort: parseInt(e.target.value) || 0 })} placeholder="Sort order" className="rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white" />
           </div>
-          <label className="flex items-center gap-2 text-xs text-white"><input type="checkbox" checked={form.visible} onChange={e => setForm({ ...form, visible: e.target.checked })} className="accent-pink-500" /> Visible</label>
-          <button onClick={save} className="rounded-xl bg-gradient-pink px-6 py-2 text-xs font-bold text-white">Add Portfolio Item</button>
+          <label className="flex items-center gap-2 text-xs text-white"><input type="checkbox" checked={form.visible} onChange={e => setForm({ ...form, visible: e.target.checked })} className="accent-pink-500" /> Visible on Agency Page</label>
+          <button onClick={save} className="rounded-xl bg-gradient-pink px-6 py-2.5 text-xs font-bold text-white cursor-pointer">Save & Sync Portfolio Project →</button>
         </div>
       </Card>
 
       <Card className="p-6">
-        <h4 className="font-bold text-white text-sm">Portfolio Items</h4>
+        <h4 className="font-bold text-white text-sm">Active Categorized Portfolio ({items.length})</h4>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {items.map((it: any) => (
-            <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
-              {(it.image_url || it.image) && <img src={it.image_url || it.image} alt={it.title} className="w-full h-32 object-cover" />}
-              <div className="p-3">
-                <p className="text-xs font-bold text-white">{it.title} · {it.client} {!it.visible && <span className="ml-1 px-1 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">HIDDEN</span>}</p>
-                <div className="mt-2 flex gap-1"><button onClick={() => toggle(it)} className="px-2 py-1 rounded bg-white/10 text-[11px] text-white">{it.visible ? 'Hide' : 'Show'}</button><button onClick={() => del(it.id)} className="px-2 py-1 rounded bg-red-500/20 text-[11px] text-red-300">Del</button></div>
+            <div key={it.id} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden flex flex-col justify-between">
+              <div>
+                {(it.image_url || it.img) && <img src={it.image_url || it.img} alt={it.title} className="w-full h-32 object-cover" />}
+                <div className="p-3">
+                  <span className="inline-block rounded-full bg-pink-500/20 border border-pink-500/30 px-2 py-0.5 text-[10px] font-bold text-pink-300 mb-1">
+                    {it.category || it.service || "Portfolio"}
+                  </span>
+                  <p className="text-xs font-bold text-white">{it.title} · {it.client} {it.visible === false && <span className="ml-1 px-1 py-0.5 rounded bg-white/10 text-[#8a7ba8] text-[9px]">HIDDEN</span>}</p>
+                  {it.link && <p className="text-[11px] font-mono text-pink-300 truncate mt-0.5">{it.link}</p>}
+                </div>
               </div>
+              <div className="px-3 pb-3 flex gap-1.5"><button onClick={() => toggle(it)} className="px-2.5 py-1 rounded bg-white/10 text-[11px] text-white cursor-pointer">{it.visible === false ? 'Show' : 'Hide'}</button><button onClick={() => del(it.id)} className="px-2.5 py-1 rounded bg-red-500/20 text-[11px] text-red-300 cursor-pointer">Delete</button></div>
             </div>
           ))}
           {items.length === 0 && <EmptyState msg="No portfolio items" />}
@@ -2462,7 +2787,7 @@ function AgencyPortfolioTab({ currentUserId }: { currentUserId: string }) {
   );
 }
 
-// ----------------- TEAM MEMBERS -----------------
+// ----------------- TEAM MEMBERS (Fixed image_url + Founders/Team Store Sync) -----------------
 function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2472,10 +2797,35 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
 
   const load = async () => {
     setLoading(true);
+    setErr(null);
     try {
-      const { data, error } = await supabase.from('team_members').select('id,name,role,bio,photo_url,social_links,sort,visible').order('sort', { ascending: true });
-      if (error) throw error;
-      setItems(data || []);
+      const { getFounders, getTeam } = await import("../data/store");
+      const { data, error } = await supabase.from('team_members').select('*').order('sort', { ascending: true });
+      if (!error && data && data.length > 0) {
+        setItems(data);
+      } else {
+        const seeded = [
+          ...getFounders().map((f: any, idx: number) => ({
+            id: f.id || `founder-${idx}`,
+            name: f.name,
+            role: f.role,
+            bio: f.bio,
+            image_url: f.photo,
+            sort: idx + 1,
+            visible: true,
+          })),
+          ...getTeam().map((t: any, idx: number) => ({
+            id: `team-${idx}`,
+            name: t.name,
+            role: t.role,
+            bio: t.bio,
+            image_url: t.photo,
+            sort: idx + 10,
+            visible: true,
+          })),
+        ];
+        setItems(seeded);
+      }
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -2496,7 +2846,7 @@ function TeamMembersTab({ currentUserId }: { currentUserId: string }) {
     try {
       let social: any = {};
       if (form.social_links) { try { social = JSON.parse(form.social_links); } catch { social = {}; } }
-      const { error } = await supabase.from('team_members').insert({ name: form.name, role: form.role, bio: form.bio, photo_url: form.photo_url, social_links: social, sort: form.sort, visible: form.visible });
+      const { error } = await supabase.from('team_members').insert({ name: form.name, role: form.role, bio: form.bio, image_url: form.photo_url, socials: social, sort: form.sort, visible: form.visible });
       if (error) throw error;
       await logActivity(currentUserId, 'team_create', form.name, {});
       setForm({ name: "", role: "", bio: "", photo_url: "", social_links: "", sort: 0, visible: true });

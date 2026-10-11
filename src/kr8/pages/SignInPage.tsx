@@ -1,235 +1,690 @@
-// Production SignIn - Yesterday's rich design restored + Supabase functional + founder unlocked
 import { useState, useEffect } from "react";
-import { useServerFn } from "@tanstack/react-start";
-import { useSeo } from "../lib/useSeo";
-import { Link, useNavigate, useSearchParams } from "../router-shim";
+import { useNavigate, Link, useLocation } from "../router-shim";
 import { useAuth } from "../context/AuthContext";
-import { Card, GradientButton, GhostButton, Pill } from "../components/ui";
-import Icon from "../components/Icon";
+import {
+  submitSuspensionAppeal,
+  getSuspendedAccounts,
+  normalizeSkillWhatsAppUrl,
+  getSkillName,
+  type SuspendedAccountRecord,
+} from "../data/store";
+import {
+  getRegisteredBiometrics,
+  authenticateWithBiometrics,
+} from "../utils/biometrics";
+import { Pill, Card, GradientButton } from "../components/ui";
+import { useSeo } from "../lib/useSeo";
 import { supabase } from "@/integrations/supabase/client";
-import { signInWithKr8Id, requestPasswordResetSecure } from "@/lib/auth.functions";
+import { useServerFn } from "@tanstack/react-start";
+import * as authFns from "@/lib/auth.functions";
 
 export default function SignInPage() {
-  useSeo({ path: "/signin", noindex: true });
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const { user, signOut, addNotification } = useAuth();
-  const signInByIdentifier = useServerFn(signInWithKr8Id);
-  const requestPasswordReset = useServerFn(requestPasswordResetSecure);
+  useSeo({
+    title: "Sign In — KR8 Digitals Account Portal",
+    description:
+      "Sign in to your KR8 Digitals Student, Tribe, or Executive account using your Email, KR8 ID, Phone Number, or linked Google account.",
+    path: "/signin",
+  });
 
-  const [mode, setMode] = useState<"credentials" | "google" | "reset">("credentials");
-  const [identifier, setIdentifier] = useState(searchParams.get("id") || searchParams.get("email") || "");
+  const nav = useNavigate();
+  const location = useLocation();
+  const {
+    student: currentAccount,
+    signIn,
+    signInWithGoogle,
+    whatsappReminderPending,
+    markWhatsAppOnboarding,
+    dismissWhatsappReminderForSession,
+  } = useAuth();
+  const resetReqFn = useServerFn(authFns.requestPasswordResetSecure);
+
+  const [mode, setMode] = useState<"credentials" | "google" | "forgot">("credentials");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ type: "error" | "success" | "info"; text: string } | null>(null);
-  const [resetTarget, setResetTarget] = useState("");
-  const [demoCode, setDemoCode] = useState("");
-  const [whatsappReminder, setWhatsappReminder] = useState<any>(null);
 
-  const inputCls = "w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none";
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Unconfirmed email state
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+  const [resendingConfirm, setResendingConfirm] = useState(false);
+  const [resendConfirmSuccess, setResendConfirmSuccess] = useState("");
+
+  // Biometric state
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [canUseBiometrics, setCanUseBiometrics] = useState(false);
+
+  const isBiometricSupported = () =>
+    typeof window !== "undefined" && Boolean(window.PublicKeyCredential);
+  const hasPasskeyRegistered = () => getRegisteredBiometrics().length > 0;
+  const getPasskeyUserId = () => getRegisteredBiometrics()[0]?.studentId || null;
 
   useEffect(() => {
-    const registered = searchParams.get("registered");
-    if (registered) {
-      setStatusMsg({ type: "success", text: "Account created! Check your email to confirm — check spam too. After confirming, sign in here." });
-    }
+    setCanUseBiometrics(isBiometricSupported() && hasPasskeyRegistered());
   }, []);
 
-  const checkWhatsappReminder = async (userId: string) => {
+  // Forgot password state
+  const [resetIdentifier, setResetIdentifier] = useState("");
+  const [resetSentMsg, setResetSentMsg] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+
+  // Suspension & Appeal state
+  const [suspendedAccount, setSuspendedAccount] = useState<SuspendedAccountRecord | null>(null);
+  const [showAppealModal, setShowAppealModal] = useState(false);
+  const [appealMessage, setAppealMessage] = useState("");
+  const [appealFeedback, setAppealFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // WhatsApp onboarding reminder modal
+  const [showWaModal, setShowWaModal] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("remind_whatsapp") === "1") {
+      setShowWaModal(true);
+    }
+  }, [location.search]);
+
+  if (currentAccount && !showWaModal && !whatsappReminderPending) {
+    return (
+      <div className="section-bg min-h-[80vh] py-16 px-4">
+        <div className="mx-auto max-w-xl text-center">
+          <Card className="p-8 sm:p-10 border-pink-500/30">
+            <Pill>Signed In</Pill>
+            <h1 className="font-display mt-4 text-2xl sm:text-3xl font-bold text-white">
+              Welcome back, {currentAccount.name}
+            </h1>
+            <p className="mt-2 text-sm text-[#b8aecf]">
+              KR8 ID: <span className="font-mono text-pink-300 font-bold">{currentAccount.id}</span>
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              {currentAccount.isFounder || currentAccount.isCoFounder || currentAccount.isAdmin ? (
+                <GradientButton to="/admin">Open Admin Dashboard →</GradientButton>
+              ) : null}
+              <GradientButton to="/dashboard">Open Dashboard →</GradientButton>
+              <Link
+                to="/academy"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-6 py-3 text-xs sm:text-sm font-bold text-white hover:bg-white/10"
+              >
+                Open Academy Profile
+              </Link>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // Show WhatsApp reminder modal if user skipped onboarding previously
+  if (currentAccount && (showWaModal || whatsappReminderPending)) {
+    const waUrl = normalizeSkillWhatsAppUrl(currentAccount.skill || "graphic");
+    const sName = getSkillName(currentAccount.skill || "graphic");
+    return (
+      <div className="section-bg min-h-screen py-16 px-4 flex items-center justify-center">
+        <div className="mx-auto max-w-xl w-full">
+          <Card className="p-6 sm:p-10 text-center border-2 border-[#25D366] shadow-2xl shadow-[#25D366]/20">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#25D366] text-3xl text-black shadow-lg">
+              📲
+            </div>
+            <Pill className="border-emerald-400/40 bg-emerald-500/10 text-emerald-300">
+              Onboarding Reminder
+            </Pill>
+            <h1 className="font-display mt-3 text-2xl sm:text-4xl font-black text-white">
+              Don't Forget to Join Your <span className="text-gradient">{sName}</span> WhatsApp Group!
+            </h1>
+            <p className="mt-3 text-sm text-[#cabfe0] leading-relaxed">
+              Welcome back, <strong className="text-white">{currentAccount.name}</strong>! You skipped joining your WhatsApp learning group earlier. All live class links (<strong className="text-white">Mon/Wed/Fri 9PM–12AM WAT</strong>) and practical assignments (<strong className="text-white">Tue/Thu/Sat</strong>) happen inside this group.
+            </p>
+
+            <div className="mt-6">
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-full bg-[#25D366] hover:bg-[#20bd5a] px-8 py-4 text-sm sm:text-base font-black text-black shadow-xl shadow-[#25D366]/30 transition-all hover:scale-105"
+              >
+                <span>💬 Join {sName} WhatsApp Group Now →</span>
+              </a>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  await markWhatsAppOnboarding(true, false);
+                  setShowWaModal(false);
+                  nav(currentAccount.isFounder || currentAccount.isAdmin ? "/admin" : "/dashboard");
+                }}
+                className="rounded-full bg-gradient-pink px-6 py-3 text-xs sm:text-sm font-bold text-white shadow-lg cursor-pointer"
+              >
+                ✓ I've Joined — Done! Go to My Profile →
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  dismissWhatsappReminderForSession();
+                  setShowWaModal(false);
+                  nav(currentAccount.isFounder || currentAccount.isAdmin ? "/admin" : "/dashboard");
+                }}
+                className="rounded-full border border-white/15 bg-white/5 px-6 py-3 text-xs sm:text-sm font-semibold text-[#b8aecf] hover:text-white cursor-pointer"
+              >
+                Remind Me Next Time
+              </button>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  const handleBiometricSignIn = async () => {
+    setError("");
+    setBiometricLoading(true);
     try {
-      const { data: prof } = await supabase.from('profiles').select('whatsapp_joined,onboarding_skipped,skill,name,kr8_id').eq('id', userId).maybeSingle();
-      if (prof && !prof.whatsapp_joined) {
-        const { data: skillRow } = await supabase.from('skill_settings').select('whatsapp_url,name').eq('skill_key', prof.skill || '').maybeSingle();
-        if (skillRow?.whatsapp_url) {
-          setWhatsappReminder({ profile: prof, whatsappUrl: skillRow.whatsapp_url, skillName: skillRow.name });
-        }
+      const res = await authenticateWithBiometrics();
+      if (!res.ok) {
+        setError(res.error || "Biometric authentication cancelled.");
+        setBiometricLoading(false);
+        return;
       }
-    } catch {}
+      const userId = res.studentId || getPasskeyUserId();
+      if (!userId) {
+        setError("No KR8 profile linked to this passkey. Sign in with password first.");
+        setBiometricLoading(false);
+        return;
+      }
+      setIdentifier(userId);
+      setError("Passkey verified! Please enter your password to complete secure session sign-in.");
+    } catch {
+      setError("Biometric verification failed.");
+    }
+    setBiometricLoading(false);
   };
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatusMsg(null);
-    if (!identifier.trim()) { setStatusMsg({ type: "error", text: "Please enter your registered Email address or KR8 ID." }); return; }
-    if (!password) { setStatusMsg({ type: "error", text: "Please enter your account password." }); return; }
+    setError("");
+    setUnconfirmedEmail(null);
+    setResendConfirmSuccess("");
+    setSuspendedAccount(null);
+    setSubmitting(true);
 
-    setLoading(true);
     try {
-      const authResult = await signInByIdentifier({
-        data: { identifier: identifier.trim(), password },
-      });
-      if (!authResult.session?.access_token || !authResult.session.refresh_token) {
-        throw new Error("Invalid KR8 ID or password");
+      const result = await signIn(identifier, password);
+      if (!result.ok) {
+        if (result.code === "EMAIL_NOT_CONFIRMED") {
+          setUnconfirmedEmail(result.email || (identifier.includes("@") ? identifier.trim() : null));
+        }
+        // Check local suspended record if any
+        const suspList = getSuspendedAccounts();
+        const clean = identifier.trim().toLowerCase();
+        const foundSusp = suspList.find(
+          (s) =>
+            s.id.toLowerCase() === clean ||
+            s.email.toLowerCase() === clean ||
+            s.phone.replace(/[^0-9]/g, "") === clean.replace(/[^0-9]/g, "")
+        );
+        if (foundSusp) {
+          setSuspendedAccount(foundSusp);
+        }
+        setError(result.error || "Sign in failed.");
+        setSubmitting(false);
+        return;
       }
 
-      const { data, error } = await supabase.auth.setSession({
-        access_token: authResult.session.access_token,
-        refresh_token: authResult.session.refresh_token,
-      });
-      if (error) throw error;
-      if (data.user) {
-        try { await supabase.from('profiles').update({ last_login_at: new Date().toISOString() }).eq('id', data.user.id); } catch {}
-        addNotification(`Welcome back!`);
-        const { data: prof } = await supabase.from('profiles').select('whatsapp_joined').eq('id', data.user.id).maybeSingle();
-        if (prof && !prof.whatsapp_joined) {
-          await checkWhatsappReminder(data.user.id);
-          setStatusMsg({ type: "info", text: "You skipped WhatsApp group join last time — please join now to get live class links!" });
-        } else {
-          navigate('/dashboard');
-        }
+      if (result.needsWhatsappReminder) {
+        setShowWaModal(true);
+        setSubmitting(false);
+        return;
       }
+
+      nav("/dashboard");
     } catch (err: any) {
-      const msg = err.message || "Sign in failed";
-      if (msg.toLowerCase().includes('email not confirmed')) {
-        setStatusMsg({ type: "error", text: "Your email is not confirmed yet. Please check your inbox (and spam) for confirmation email and click the button. Then sign in again." });
-      } else {
-        setStatusMsg({ type: "error", text: msg.includes('Invalid login') ? "The email/ID or password is incorrect. Founder? Use your registered email and password, or reset password." : msg });
-      }
-    } finally { setLoading(false); }
+      setError(err?.message || "Sign in failed.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleGoogleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStatusMsg(null);
+  const handleResendConfirmation = async () => {
+    const emailToSend = unconfirmedEmail || (identifier.includes("@") ? identifier.trim() : "");
+    if (!emailToSend) return;
+    setResendingConfirm(true);
+    setResendConfirmSuccess("");
     try {
-      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${window.location.origin}/auth/confirmed` } });
-      if (error) throw error;
-    } catch (err: any) {
-      setStatusMsg({ type: "error", text: err.message || "Google sign-in failed" });
+      const siteOrigin = typeof window !== "undefined" ? window.location.origin : "https://www.kr8digitals.com";
+      await supabase.auth.resend({
+        type: "signup",
+        email: emailToSend,
+        options: {
+          emailRedirectTo: `${siteOrigin}/auth/confirmed`,
+        },
+      });
+      try {
+        const { sendRegistrationConfirmationEmail } = await import("@/lib/welcome.functions");
+        await sendRegistrationConfirmationEmail({
+          data: {
+            email: emailToSend,
+            name: "Scholar",
+            siteOrigin,
+          },
+        });
+      } catch {}
+      setResendConfirmSuccess(
+        `✅ Confirmation email resent to ${emailToSend}! Open your inbox (or Spam/Promotions) and click the large Confirm button.`
+      );
+    } catch (e: any) {
+      setResendConfirmSuccess(`⚠️ ${e?.message || "Could not resend confirmation email."}`);
+    } finally {
+      setResendingConfirm(false);
+    }
+  };
+
+  const handleGoogleSubmit = async () => {
+    setError("");
+    const res = await signInWithGoogle();
+    if (!res.ok) {
+      setError(res.error || "Google sign-in failed.");
     }
   };
 
   const handleRequestReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    const target = resetTarget.trim() || identifier.trim();
-    if (!target) { setStatusMsg({ type: "error", text: "Please enter the email address registered to your KR8 account." }); return; }
-    if (!target.includes("@")) {
-      setStatusMsg({ type: "error", text: "For account security, password resets must use your registered email address." });
+    setError("");
+    setResetSentMsg("");
+    const cleanEmail = resetIdentifier.trim().toLowerCase();
+    if (!cleanEmail.includes("@")) {
+      setError("Please enter your registered email address to receive a password reset link.");
       return;
     }
+    setResetBusy(true);
     try {
-      const result = await requestPasswordReset({ data: { email: target } });
-      setStatusMsg({ type: "success", text: result.message || "If the account is eligible, a reset email will be sent. Check inbox and spam." });
-      setDemoCode("sent");
+      const res: any = await resetReqFn({ data: { email: cleanEmail } });
+      if (!res.ok) {
+        setError(res.message || "Password reset rate limited.");
+      } else {
+        setResetSentMsg(
+          res.message ||
+            "If an account exists for that email, a password reset link has been sent. Please check your inbox."
+        );
+      }
     } catch (err: any) {
-      setStatusMsg({ type: "error", text: err.message || "Reset failed" });
+      setError(err?.message || "Failed to request password reset.");
+    } finally {
+      setResetBusy(false);
     }
   };
 
+  const handleAppealSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!suspendedAccount) return;
+    const res = submitSuspensionAppeal(suspendedAccount.id, appealMessage);
+    setAppealFeedback({ ok: res.ok, msg: res.message });
+    if (res.ok) {
+      setAppealMessage("");
+    }
+  };
+
+  const inputCls =
+    "w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-sm text-white placeholder-[#7a6b94] focus:border-pink-400/60 focus:outline-none transition-colors";
+
   return (
-    <div className="section-bg min-h-[85vh] py-12 sm:py-16 px-5">
+    <div className="section-bg min-h-screen py-12 sm:py-16 px-4">
       <div className="mx-auto max-w-lg">
-        <div className="text-center mb-8">
-          <div className="mx-auto mb-4 flex justify-center">
-            <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-pink-500/25 via-purple-500/15 to-transparent p-2 border border-pink-500/40 shadow-2xl shadow-pink-500/30">
-              <img src="/branding/kr8_logo.png" alt="KR8 Digitals Logo" className="h-full w-full object-contain filter drop-shadow" />
-            </div>
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-pink shadow-lg shadow-pink-500/30">
+            <img src="/branding/kr8_logo.png" alt="KR8 Digitals" className="h-9 w-9 object-contain" />
           </div>
-          <Pill>Member Portal · Yesterday's Design Restored</Pill>
-          <h1 className="font-display mt-4 text-3xl sm:text-4xl font-bold text-white">
-            Sign In to <span className="text-gradient">KR8 Platform</span>
+          <Pill>Secure Access Portal</Pill>
+          <h1 className="font-display mt-3 text-3xl sm:text-4xl font-bold text-white">
+            Sign In to <span className="text-gradient">KR8 Digitals</span>
           </h1>
-          <p className="mt-2 text-xs sm:text-sm text-[#cabfe0]">Sign in with your Email, KR8 ID, or Google. Secure Supabase Auth — works on any device.</p>
-          <div className="mt-4 flex items-center justify-center gap-2 text-xs sm:text-sm text-[#a594c7]">
-            <span>Need an account?</span>
-            <Link to="/register" className="font-bold text-pink-400 hover:text-pink-300 underline">Register Free here →</Link>
-          </div>
+          <p className="mt-2 text-sm text-[#b8aecf]">
+            Access your Student Dashboard, Tribe network, or Executive Portal.
+          </p>
+          <p className="mt-2 text-xs text-[#8a7ba8]">
+            Don't have an account yet?{" "}
+            <Link
+              to="/register"
+              className="font-bold text-pink-400 hover:text-pink-300 underline underline-offset-4"
+            >
+              Create a Free Account →
+            </Link>
+          </p>
         </div>
 
-        {user && (
-          <div className="mb-6 rounded-2xl border border-pink-500/40 bg-pink-500/10 p-4 text-center">
-            <p className="text-xs sm:text-sm text-pink-200">You are currently signed in as <span className="font-bold text-white">{user.name}</span>.</p>
-            <div className="mt-3 flex justify-center gap-2.5">
-              <GradientButton to="/dashboard" className="text-xs px-4 py-2">Open Dashboard →</GradientButton>
-              <GhostButton onClick={signOut} className="text-xs px-4 py-2 border-white/20">Sign Out</GhostButton>
-            </div>
+        <Card className="mt-8 p-6 sm:p-8 border-pink-500/25 shadow-2xl">
+          {/* Sign-In Mode Tabs */}
+          <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-black/40 p-1.5 border border-white/10">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("credentials");
+                setError("");
+              }}
+              className={`rounded-xl py-2.5 text-xs font-bold transition-all ${
+                mode === "credentials"
+                  ? "bg-gradient-pink text-white shadow-md"
+                  : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Email / ID 🔑
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("google");
+                setError("");
+              }}
+              className={`rounded-xl py-2.5 text-xs font-bold transition-all ${
+                mode === "google"
+                  ? "bg-gradient-pink text-white shadow-md"
+                  : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Google Account 🌐
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("forgot");
+                setError("");
+              }}
+              className={`rounded-xl py-2.5 text-xs font-bold transition-all ${
+                mode === "forgot"
+                  ? "bg-gradient-pink text-white shadow-md"
+                  : "text-[#b8aecf] hover:text-white"
+              }`}
+            >
+              Lost Password 🔄
+            </button>
           </div>
-        )}
 
-        <Card className="p-6 sm:p-8">
-          <div className="mb-6 flex rounded-xl border border-white/10 bg-black/30 p-1 text-xs">
-            <button type="button" onClick={() => { setMode("credentials"); setStatusMsg(null); }} className={`flex-1 rounded-lg py-2 font-bold ${mode === "credentials" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"}`}>Email / ID 🔑</button>
-            <button type="button" onClick={() => { setMode("google"); setStatusMsg(null); }} className={`flex-1 rounded-lg py-2 font-bold ${mode === "google" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"}`}>Google 🌐</button>
-            <button type="button" onClick={() => { setMode("reset"); setStatusMsg(null); }} className={`flex-1 rounded-lg py-2 font-bold ${mode === "reset" ? "bg-gradient-pink text-white shadow" : "text-[#b8aecf] hover:text-white"}`}>Lost Password 🔄</button>
-          </div>
+          {error && (
+            <div className="mt-5 rounded-xl border border-red-500/40 bg-red-500/15 p-3.5 text-xs text-red-200 font-medium">
+              <div>⚠️ {error}</div>
 
-          {statusMsg && (
-            <div className={`mb-5 rounded-xl p-3.5 text-xs font-semibold ${statusMsg.type === "error" ? "border border-red-500/40 bg-red-500/15 text-red-200" : statusMsg.type === "success" ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : "border border-blue-500/40 bg-blue-500/15 text-blue-200"}`}>
-              {statusMsg.text}
-            </div>
-          )}
-
-          {whatsappReminder && (
-            <div className="mb-5 rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/10 p-4">
-              <p className="text-sm font-bold text-white">⚠️ You skipped WhatsApp group join!</p>
-              <p className="text-xs text-emerald-200 mt-1">Join {whatsappReminder.skillName} group now to get live class links Mon/Wed/Fri 9PM-12AM WAT</p>
-              <div className="mt-3 flex gap-2">
-                <a href={whatsappReminder.whatsappUrl} target="_blank" rel="noreferrer" className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-bold text-white">Join WhatsApp Group →</a>
-                <button onClick={() => { setWhatsappReminder(null); navigate('/dashboard'); }} className="rounded-full border border-white/15 px-4 py-2 text-xs text-white">Skip & Go to Dashboard</button>
-              </div>
-            </div>
-          )}
-
-          {mode === "credentials" && (
-            <form onSubmit={handleCredentialsSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">Email or KR8 ID *</label>
-                <input type="text" required placeholder="e.g. name@example.com or KR82026KT0001GDVFD" className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none" value={identifier} onChange={e => setIdentifier(e.target.value)} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-[#cabfe0]">Password *</label>
-                  <button type="button" onClick={() => { setMode("reset"); setResetTarget(identifier); }} className="text-xs text-pink-400 hover:text-pink-300 underline">Forgot Password?</button>
+              {unconfirmedEmail && (
+                <div className="mt-3 pt-3 border-t border-red-500/30 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-amber-200">
+                    Need a fresh confirmation link for <strong>{unconfirmedEmail}</strong>?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResendConfirmation}
+                    disabled={resendingConfirm}
+                    className="rounded-lg bg-gradient-pink px-3.5 py-1.5 text-[11px] font-bold text-white shadow-md hover:opacity-90 transition cursor-pointer"
+                  >
+                    {resendingConfirm ? "Sending..." : "Resend Confirmation Email →"}
+                  </button>
                 </div>
-                <div className="relative">
-                  <input type={showPassword ? "text" : "password"} required placeholder="••••••••" className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none pr-12" value={password} onChange={e => setPassword(e.target.value)} />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-3 text-xs text-[#8a7ba8] hover:text-white">{showPassword ? "Hide" : "Show"}</button>
-                </div>
-              </div>
-              <div className="pt-2">
-                <GradientButton type="submit" disabled={loading} className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold disabled:opacity-50">
-                  {loading ? "Authenticating..." : "Sign In to KR8 →"}
-                </GradientButton>
-              </div>
-              <p className="text-[11px] text-center text-[#6a5b82]">Founder locked out? Use your registered email (not phone) + password. Or click Forgot Password to reset. Ensure email confirmed.</p>
-            </form>
-          )}
+              )}
 
-          {mode === "google" && (
-            <form onSubmit={handleGoogleSignIn} className="space-y-4">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow">
-                  <svg className="h-6 w-6" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+              {resendConfirmSuccess && (
+                <div className="mt-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 p-2 text-[11px] text-emerald-200">
+                  {resendConfirmSuccess}
                 </div>
-                <h3 className="text-base font-bold text-white">Google Account Sign-In</h3>
-                <p className="mt-1 text-xs text-[#cabfe0]">Secure OAuth via Supabase — redirects to confirmation page.</p>
-              </div>
-              <GradientButton type="submit" className="w-full py-3.5 shadow-xl shadow-pink-500/25 text-sm font-bold">Continue with Google →</GradientButton>
-            </form>
-          )}
+              )}
 
-          {mode === "reset" && (
-            <div className="space-y-4">
-              <form onSubmit={handleRequestReset} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">Registered Email *</label>
-                  <input type="email" required placeholder="name@example.com" className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-[#6f6390] focus:border-pink-400/60 focus:outline-none" value={resetTarget} onChange={e => setResetTarget(e.target.value)} />
-                </div>
-                <GradientButton type="submit" className="w-full py-3 text-xs font-bold">Request Reset Email 📩</GradientButton>
-              </form>
-              {demoCode && (
-                <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
-                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/60 p-3 text-center">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Reset email sent — check inbox</p>
-                    <p className="text-[10px] text-emerald-300">Click link in email to set new password. Link goes to /reset-password page.</p>
-                  </div>
+              {suspendedAccount && (
+                <div className="mt-3 pt-3 border-t border-red-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <span className="text-[11px] text-amber-300">
+                    ⏳ {Math.max(0, Math.ceil((suspendedAccount.AppealDeadlineAt - Date.now()) / (1000 * 60 * 60 * 24)))}{" "}
+                    days left in your 30-day appeal window before permanent deletion.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAppealModal(true);
+                      setAppealFeedback(null);
+                    }}
+                    className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold text-black hover:bg-amber-400 transition"
+                  >
+                    Submit Appeal →
+                  </button>
                 </div>
               )}
             </div>
           )}
+
+          {/* MODE 1: CREDENTIALS */}
+          {mode === "credentials" && (
+            <form onSubmit={handleCredentialsSubmit} className="mt-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                  Email, Phone Number, or KR8 ID *
+                </label>
+                <input
+                  required
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="e.g. you@email.com, +234..., or KR82026..."
+                  className={inputCls}
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-[#cabfe0]">Password *</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-[11px] text-pink-400 hover:text-pink-300"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+                <input
+                  required
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your account password"
+                  className={inputCls}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("forgot");
+                    setError("");
+                  }}
+                  className="text-[#a594c7] hover:text-pink-300 underline underline-offset-4"
+                >
+                  Forgot your password?
+                </button>
+                <Link to="/register" className="text-pink-400 hover:text-pink-300 font-semibold">
+                  Need an account?
+                </Link>
+              </div>
+
+              <div className="pt-2 space-y-3">
+                <GradientButton type="submit" disabled={submitting} className="w-full py-3.5 text-sm">
+                  {submitting ? "Signing In..." : "Sign In to My Account →"}
+                </GradientButton>
+
+                {/* Biometrics / Passkey Sign-In */}
+                {isBiometricSupported() && (
+                  <div className="relative pt-2">
+                    <div className="flex items-center gap-3 my-2">
+                      <div className="h-px flex-1 bg-white/10" />
+                      <span className="text-[10px] uppercase tracking-widest text-[#7a6b94] font-semibold">
+                        Or Instant Biometrics
+                      </span>
+                      <div className="h-px flex-1 bg-white/10" />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={biometricLoading}
+                      onClick={handleBiometricSignIn}
+                      className="mt-2 flex w-full items-center justify-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-3 px-4 text-xs sm:text-sm font-bold text-emerald-300 hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <span className="text-base">🫆</span>
+                      <span>
+                        {biometricLoading
+                          ? "Scanning Biometrics..."
+                          : canUseBiometrics
+                          ? "Sign in with Fingerprint / Face ID"
+                          : "Use Device Passkey / Biometrics"}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </form>
+          )}
+
+          {/* MODE 2: GOOGLE SIGN-IN */}
+          {mode === "google" && (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 p-4 text-xs text-blue-100 leading-relaxed">
+                <strong className="text-white block mb-1">Google Account Verification:</strong>
+                Sign in seamlessly with your Google account. Make sure you use the Google account matching your registered KR8 email address.
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGoogleSubmit}
+                className="w-full flex items-center justify-center gap-2.5 rounded-xl bg-white py-3.5 px-5 text-sm font-bold text-gray-900 shadow-lg hover:bg-gray-100 transition cursor-pointer"
+              >
+                <span className="text-base font-extrabold text-blue-600">G</span>
+                <span>Continue with Google →</span>
+              </button>
+            </div>
+          )}
+
+          {/* MODE 3: FORGOT PASSWORD */}
+          {mode === "forgot" && (
+            <div className="mt-6">
+              <form onSubmit={handleRequestReset} className="space-y-4">
+                <div className="rounded-xl border border-purple-500/25 bg-purple-500/10 p-3.5 text-xs text-[#d7cce8]">
+                  Enter your registered email address and we will send a secure password reset link to your inbox.
+                </div>
+
+                {resetSentMsg && (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-3.5 text-xs text-emerald-200">
+                    ✅ {resetSentMsg}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                    Registered Email Address *
+                  </label>
+                  <input
+                    required
+                    type="email"
+                    value={resetIdentifier}
+                    onChange={(e) => setResetIdentifier(e.target.value)}
+                    placeholder="you@example.com"
+                    className={inputCls}
+                  />
+                </div>
+
+                <GradientButton type="submit" disabled={resetBusy} className="w-full py-3.5 text-sm">
+                  {resetBusy ? "Sending Reset Link..." : "Send Password Reset Link →"}
+                </GradientButton>
+              </form>
+            </div>
+          )}
         </Card>
       </div>
+
+      {/* 30-DAY SUSPENSION APPEAL MODAL */}
+      {showAppealModal && suspendedAccount && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+          onClick={() => setShowAppealModal(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl border border-amber-500/40 bg-[#140024] p-6 sm:p-8 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                  30-Day Grace Period Appeal
+                </span>
+                <h3 className="font-display text-xl font-bold text-white mt-0.5">
+                  Appeal Account Suspension
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowAppealModal(false)}
+                className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-[#b8aecf] hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-200 space-y-1">
+              <p>
+                <strong>Account:</strong> {suspendedAccount.name} ({suspendedAccount.id})
+              </p>
+              <p>
+                <strong>Suspension Reason:</strong> {suspendedAccount.reason}
+              </p>
+              <p className="text-amber-300 pt-1">
+                ⚠️ Accounts that do not resolve their suspension within 30 days are permanently deleted.
+              </p>
+            </div>
+
+            {appealFeedback && (
+              <div
+                className={`mt-4 rounded-xl border p-3.5 text-xs font-medium ${
+                  appealFeedback.ok
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
+                    : "border-red-500/40 bg-red-500/15 text-red-200"
+                }`}
+              >
+                {appealFeedback.msg}
+              </div>
+            )}
+
+            {suspendedAccount.appealStatus === "pending" ? (
+              <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200">
+                <strong>Appeal Pending Review:</strong> Your appeal was submitted and is awaiting review by the KR8 Administration team.
+                {suspendedAccount.appealMessage && (
+                  <p className="mt-2 italic text-white/80">"{suspendedAccount.appealMessage}"</p>
+                )}
+              </div>
+            ) : (
+              <form onSubmit={handleAppealSubmit} className="mt-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#cabfe0] mb-1.5">
+                    Explain Why Your Account Should Be Restored *
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={appealMessage}
+                    onChange={(e) => setAppealMessage(e.target.value)}
+                    placeholder="Provide context or commitment to KR8 community guidelines..."
+                    className={inputCls}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAppealModal(false)}
+                    className="rounded-xl border border-white/15 px-4 py-2.5 text-xs font-semibold text-[#b8aecf] hover:text-white"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-gradient-pink px-5 py-2.5 text-xs font-bold text-white shadow-lg"
+                  >
+                    Submit Official Appeal →
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

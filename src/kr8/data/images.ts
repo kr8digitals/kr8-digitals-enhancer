@@ -20,8 +20,8 @@ export const IMG = {
     "https://images.pexels.com/photos/7598009/pexels-photo-7598009.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=600&w=900",
   portfolioText:
     "https://images.pexels.com/photos/18833779/pexels-photo-18833779.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=600&w=900",
-  // Exact founder image supplied by KR8 Digitals via Drive.
-  founder: "https://drive.google.com/uc?export=view&id=1Ssje7WtVFMd8TZxMfrex1S0lKG6p_Wp9",
+  // Exact founder image supplied by KR8 Digitals.
+  founder: "/founder_timfire_wide.jpg",
   man1:
     "https://images.pexels.com/photos/30496625/pexels-photo-30496625.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=600&w=600",
   man2:
