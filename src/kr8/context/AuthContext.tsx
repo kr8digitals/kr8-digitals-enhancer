@@ -84,7 +84,7 @@ export type AuthUser = {
 
 export type Account = AuthUser;
 
-type Notification = { id: string; text: string; ts: number };
+type Notification = { id: string; text: string; ts: number; link?: string | null; read?: boolean };
 
 type AuthCtx = {
   user: AuthUser | null;
@@ -129,6 +129,8 @@ function mapProfileToAuthUser(profile: any, roles: UserRole[]): AuthUser {
   const isHost = roleNames.some(r => ['founder','co-founder','admin','coach'].includes(r));
 
   const adminRole = roles.find(r => ['founder','co-founder','admin','coach','assistant','attendance_reviewer'].includes(r.role));
+  const executiveRole = isFounder ? 'Founder' : isCoFounder ? 'Co-Founder' : null;
+  const displayTitle = adminRole?.title || (isFounder ? 'Founder & CEO' : isCoFounder ? 'Co-Founder' : null);
 
   // Parse permissions - can be jsonb array or string array
   let permissions: string[] = [];
@@ -174,13 +176,15 @@ function mapProfileToAuthUser(profile: any, roles: UserRole[]): AuthUser {
     isFounder,
     isCoFounder,
     type: isFounder ? 'founder' : isCoFounder ? 'co-founder' : (roleNames.includes('tribe') ? 'tribe' : 'student'),
-    executiveRole: isFounder ? 'Founder' : isCoFounder ? 'Co-Founder' : undefined,
-    title: adminRole?.title || (isFounder ? 'Founder & CEO' : isCoFounder ? 'Co-Founder' : undefined),
-    admin: adminRole ? {
-      role: (adminRole.role === 'founder' || adminRole.role === 'co-founder' ? 'ultimate' : adminRole.role as any),
-      title: adminRole.title || undefined,
-      permissions,
-    } : undefined,
+    ...(executiveRole ? { executiveRole } : {}),
+    ...(displayTitle ? { title: displayTitle } : {}),
+    ...(adminRole ? {
+      admin: {
+        role: (adminRole.role === 'founder' || adminRole.role === 'co-founder' ? 'ultimate' : adminRole.role as any),
+        ...(adminRole.title ? { title: adminRole.title } : {}),
+        permissions,
+      },
+    } : {}),
   };
 }
 
@@ -223,8 +227,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loadDbNotifications = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id,text,link,read,created_at")
+        .eq("user_id", userId)
+        .eq("read", false)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      const dbNotifications = (data ?? []).map((notification) => ({
+        id: notification.id,
+        text: notification.text,
+        ts: notification.created_at ? Date.parse(notification.created_at) : Date.now(),
+        link: notification.link,
+        read: notification.read ?? false,
+      }));
+      setNotifications((previous) => {
+        const dbIds = new Set(dbNotifications.map((notification) => notification.id));
+        return [...dbNotifications, ...previous.filter((notification) => !dbIds.has(notification.id))].slice(0, 20);
+      });
+    } catch (error) {
+      console.warn("Unable to load account notifications", error);
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
+    let activeRealtimeUserId: string | null = null;
+    let profileChannel: any = null;
+    let notificationsChannel: any = null;
+
+    const clearRealtime = () => {
+      if (profileChannel) void supabase.removeChannel(profileChannel);
+      if (notificationsChannel) void supabase.removeChannel(notificationsChannel);
+      profileChannel = null;
+      notificationsChannel = null;
+      activeRealtimeUserId = null;
+    };
+
+    const setupRealtimeForUser = (userId: string) => {
+      if (activeRealtimeUserId === userId) return;
+      clearRealtime();
+      activeRealtimeUserId = userId;
+
+      profileChannel = supabase
+        .channel(`profile-${userId}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${userId}`,
+        }, async () => {
+          const profile = await fetchProfile(userId);
+          if (mounted) setUser(profile);
+        })
+        .subscribe();
+
+      notificationsChannel = supabase
+        .channel(`notifications-${userId}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        }, (payload) => {
+          if (!mounted) return;
+          if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id?: string } | null)?.id;
+            if (deletedId) setNotifications((previous) => previous.filter((notification) => notification.id !== deletedId));
+            return;
+          }
+
+          const row = payload.new as { id?: string; text?: string; link?: string | null; read?: boolean | null; created_at?: string | null };
+          const notificationId = row.id;
+          if (!notificationId) return;
+          setNotifications((previous) => {
+            if (row.read) return previous.filter((notification) => notification.id !== notificationId);
+            const notification: Notification = {
+              id: notificationId,
+              text: row.text || "You have a new notification.",
+              ts: row.created_at ? Date.parse(row.created_at) : Date.now(),
+              link: row.link || null,
+              read: false,
+            };
+            return [notification, ...previous.filter((item) => item.id !== notification.id)].slice(0, 20);
+          });
+        })
+        .subscribe();
+    };
 
     const init = async () => {
       try {
@@ -249,10 +342,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data: { session: initialSession } } = await supabase.auth.getSession();
 
         if (initialSession?.user) {
+          setupRealtimeForUser(initialSession.user.id);
           setSession(initialSession);
           setSupabaseUser(initialSession.user);
           const profile = await fetchProfile(initialSession.user.id);
           if (mounted) setUser(profile);
+          await loadDbNotifications(initialSession.user.id);
         }
       } catch (err) {
         console.error('Auth init error:', err);
@@ -270,8 +365,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSupabaseUser(newSession?.user || null);
 
       if (newSession?.user) {
+        setupRealtimeForUser(newSession.user.id);
         const profile = await fetchProfile(newSession.user.id);
         setUser(profile);
+        void loadDbNotifications(newSession.user.id);
 
         if (event === 'SIGNED_IN') {
           try {
@@ -283,37 +380,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch {}
         }
       } else {
+        clearRealtime();
         setUser(null);
+        setNotifications([]);
       }
 
       setLoading(false);
     });
 
-    let profileChannel: any = null;
-    const setupRealtime = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      if (!currentSession?.user) return;
-
-      profileChannel = supabase
-        .channel(`profile-${currentSession.user.id}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${currentSession.user.id}`
-        }, async () => {
-          const profile = await fetchProfile(currentSession.user.id);
-          if (mounted) setUser(profile);
-        })
-        .subscribe();
-    };
-
-    setupRealtime();
-
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      if (profileChannel) supabase.removeChannel(profileChannel);
+      clearRealtime();
     };
   }, []);
 
@@ -336,7 +414,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(profile);
           return { ok: true, user: profile };
         }
-        return { ok: true, user: undefined };
+        return { ok: true };
       }
 
       return { ok: false, error: 'Sign in failed' };
@@ -361,7 +439,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       };
       if (typeof window !== 'undefined') {
-        signUpOptions.emailRedirectTo = `${window.location.origin}/dashboard`;
+        signUpOptions.emailRedirectTo = `${window.location.origin}/auth/confirmed`;
       }
 
       const { data, error } = await supabase.auth.signUp({
@@ -458,7 +536,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const addNotification = (text: string) => {
     setNotifications(prev => {
-      const next = [{ id: Math.random().toString(36).slice(2), text, ts: Date.now() }, ...prev].slice(0, 20);
+      const next = [{ id: Math.random().toString(36).slice(2), text, ts: Date.now(), read: false }, ...prev].slice(0, 20);
       try {
         localStorage.setItem('kr8_notifs', JSON.stringify(next));
       } catch {}
@@ -471,6 +549,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.removeItem('kr8_notifs');
     } catch {}
+    if (user?.id) {
+      void supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("user_id", user.id)
+        .eq("read", false)
+        .then(({ error }) => {
+          if (error) console.warn("Unable to mark notifications as read", error.message);
+        });
+    }
   };
 
   return (

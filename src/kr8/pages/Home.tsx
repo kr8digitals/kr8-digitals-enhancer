@@ -93,16 +93,13 @@ function GuestHome() {
     // Real DB counts for production — keeps 22 today's registrations visible, never negative
     const fetchRealCounts = async () => {
       try {
-        const { data: pub } = await supabase.rpc('public_counts' as any);
-        if (pub) {
-          setLiveCounts({
-            students: Math.max(0, (pub as any).total_students || studentCount()),
-            tribe: Math.max(0, Math.floor(((pub as any).total_students || studentCount()) * 2.5) + 500),
-          });
-          return;
-        }
-        const { count } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
-        if (count) setLiveCounts({ students: count, tribe: Math.floor(count * 2.5) + 500 });
+        const { data: pub, error } = await supabase.rpc('public_counts' as any);
+        if (error) throw error;
+        const totalStudents = Math.max(0, Number((pub as any)?.total_students || studentCount()));
+        setLiveCounts({
+          students: totalStudents,
+          tribe: Math.floor(totalStudents * 2.5) + 500,
+        });
       } catch {}
     };
     fetchRealCounts();
@@ -710,8 +707,21 @@ function GuestHome() {
                   )}
 
                   {client.img && (
-                    <div className="aspect-[16/9] overflow-hidden bg-black/40">
-                      {client.link ? (
+                    <div className="aspect-[16/10] overflow-hidden bg-black/40 relative">
+                      {(client as any).previewUrl || (client.link && client.service?.includes("Website")) ? (
+                        <>
+                          <iframe
+                            src={(client as any).previewUrl || client.link}
+                            title={client.title}
+                            className="absolute inset-0 top-7 w-full h-[calc(100%-28px)] border-0 bg-white"
+                            loading="lazy"
+                            sandbox="allow-scripts allow-same-origin allow-popups"
+                          />
+                          <a href={(client as any).previewUrl || client.link} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/0 hover:bg-black/20 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <span className="rounded-full bg-white text-black px-4 py-2 text-xs font-bold shadow-xl">Live Desktop Preview ↗</span>
+                          </a>
+                        </>
+                      ) : client.link ? (
                         <a href={client.link} target="_blank" rel="noreferrer" className="block h-full w-full group/link relative">
                           <img
                             src={client.img}

@@ -16,14 +16,11 @@ import { useAuth } from "../context/AuthContext";
 
 const LiveRoom = lazy(() => import("../live/LiveRoom"));
 
-const activityCopy: any = {
-  page_view: "explored KR8",
-  sign_in: "signed in",
-  sign_up: "joined KR8",
-  sign_out: "signed out",
-  live_join: "joined a live room",
-  live_message: "sent a message live",
-  stream_join: "joined a broadcast",
+type CommunityActivity = {
+  id: string;
+  action: string;
+  message: string;
+  created_at: string;
 };
 
 function SectionLabel({ children, count }: any) {
@@ -121,24 +118,62 @@ function StartForm({ me, onStarted }: any) {
 }
 
 function CommunityPulse() {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<CommunityActivity[]>([]);
+
   useEffect(() => {
-    let alive = true;
-    const load = () => supabase.from("activity_log").select("id,actor_name,action,target,created_at").order("created_at", { ascending: false }).limit(6)
-      .then(({ data }) => alive && setItems(data || []));
-    load();
-    const channel = supabase.channel("live-activity-pulse").on("postgres_changes", { event: "INSERT", schema: "public", table: "activity_log" }, load).subscribe();
-    return () => { alive = false; supabase.removeChannel(channel); };
+    let active = true;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("activity_feed")
+        .select("id,action,message,created_at")
+        .order("created_at", { ascending: false })
+        .limit(6);
+
+      if (!active) return;
+      if (error) {
+        console.warn("Unable to load the public community pulse", error);
+        return;
+      }
+      setItems(data ?? []);
+    };
+
+    void load();
+    const channel = supabase
+      .channel("live-public-activity-pulse")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "activity_feed" },
+        () => void load(),
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
   }, []);
+
   return (
     <div className="live-activity-list">
-      {items.length === 0 ? <p className="live-empty-small">The community pulse will appear here.</p> : items.map((item: any, index: number) => (
-        <div className="live-activity" key={item.id}>
-          <span className="live-avatar">{(item.actor_name || "K").charAt(0).toUpperCase()}</span>
-          <p className="min-w-0 flex-1 text-sm"><b>{item.actor_name || "A KR8 member"}</b> <span>{activityCopy[item.action] || item.action.replaceAll("_", " ")}</span><small>{new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></p>
-          {index === 0 && <span className="live-unread-dot" />}
-        </div>
-      ))}
+      {items.length === 0 ? (
+        <p className="live-empty-small">The community pulse will appear here.</p>
+      ) : (
+        items.map((item, index) => (
+          <div className="live-activity" key={item.id}>
+            <span className="live-avatar">K</span>
+            <p className="min-w-0 flex-1 text-sm">
+              <span>{item.message}</span>
+              <small>
+                {new Date(item.created_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </small>
+            </p>
+            {index === 0 && <span className="live-unread-dot" />}
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -237,26 +272,25 @@ export default function LivePage() {
         else if (hangoutStatus.isOpen) type = 'hangout';
       }
       if (!type) return;
+      const attendanceStatus = getAttendanceStatus(type, {}, now);
+      if (!attendanceStatus.isOpen) return;
       const should = shouldAutoMarkLiveAttendance(purpose, type, now);
       if (!should) return;
-      const userId = student?.id || me.id;
-      const kr8Id = student?.kr8_id || (pendingJoin?.kr8) || null;
-      if (!student && !kr8Id && !pendingJoin?.kr8) {
-        setKr8Prompt({ roomId, key: purpose });
+      if (!student?.id || !student?.kr8_id) {
+        setAttendanceBanner("Sign in with your KR8 account to auto-mark attendance.");
+        setTimeout(() => setAttendanceBanner(null), 6000);
         return;
       }
-      const { data, error } = await supabase.rpc('auto_mark_live_attendance', {
-        p_user_id: userId,
-        p_kr8_id: kr8Id,
-        p_room_id: roomId,
-        p_purpose: purpose,
+      const { data: attendanceId, error } = await supabase.rpc('auto_mark_live_attendance', {
+        p_user_id: student.id,
+        p_kr8_id: student.kr8_id,
+        p_live_room_id: roomId,
+        p_live_purpose: purpose,
         p_type: type,
       });
       if (error) throw error;
-      if ((data as any)?.already_marked) {
-        setAttendanceBanner(`✅ Already marked for ${type} today`);
-      } else if ((data as any)?.success) {
-        setAttendanceBanner(`🎉 Auto-marked ${type} attendance! +${(data as any).points_awarded || 15}pts · Streak updated · Live feed`);
+      if (attendanceId) {
+        setAttendanceBanner(`✅ ${type} attendance confirmed for this live session.`);
         window.dispatchEvent(new Event('kr8:attendance-updated'));
       }
       setTimeout(() => setAttendanceBanner(null), 6000);

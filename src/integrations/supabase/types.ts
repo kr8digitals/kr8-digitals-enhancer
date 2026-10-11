@@ -89,6 +89,9 @@ export type Database = {
           name: string
           email: string
           phone: string | null
+          phone_normalized: string | null
+          phone_verified: boolean | null
+          phone_verified_at: string | null
           country: string | null
           dob: string | null
           skill: string | null
@@ -106,6 +109,16 @@ export type Database = {
           created_at: string | null
           updated_at: string | null
           is_placeholder: boolean | null
+          whatsapp_joined: boolean | null
+          onboarding_skipped: boolean | null
+          whatsapp_joined_at: string | null
+          email_confirmed_at: string | null
+          last_login_at: string | null
+          double_skill: boolean | null
+          second_skill: string | null
+          graduation_comment: string | null
+          graduation_score: number | null
+          total_points: number | null
         }
         Insert: {
           id: string
@@ -113,6 +126,9 @@ export type Database = {
           name: string
           email: string
           phone?: string | null
+          phone_normalized?: string | null
+          phone_verified?: boolean | null
+          phone_verified_at?: string | null
           country?: string | null
           dob?: string | null
           skill?: string | null
@@ -130,6 +146,16 @@ export type Database = {
           created_at?: string | null
           updated_at?: string | null
           is_placeholder?: boolean | null
+          whatsapp_joined?: boolean | null
+          onboarding_skipped?: boolean | null
+          whatsapp_joined_at?: string | null
+          email_confirmed_at?: string | null
+          last_login_at?: string | null
+          double_skill?: boolean | null
+          second_skill?: string | null
+          graduation_comment?: string | null
+          graduation_score?: number | null
+          total_points?: number | null
         }
         Update: {
           id?: string
@@ -137,6 +163,9 @@ export type Database = {
           name?: string
           email?: string
           phone?: string | null
+          phone_normalized?: string | null
+          phone_verified?: boolean | null
+          phone_verified_at?: string | null
           country?: string | null
           dob?: string | null
           skill?: string | null
@@ -154,6 +183,16 @@ export type Database = {
           created_at?: string | null
           updated_at?: string | null
           is_placeholder?: boolean | null
+          whatsapp_joined?: boolean | null
+          onboarding_skipped?: boolean | null
+          whatsapp_joined_at?: string | null
+          email_confirmed_at?: string | null
+          last_login_at?: string | null
+          double_skill?: boolean | null
+          second_skill?: string | null
+          graduation_comment?: string | null
+          graduation_score?: number | null
+          total_points?: number | null
         }
         Relationships: []
       }
@@ -364,6 +403,195 @@ export type Database = {
           id?: string
           path?: string | null
           target?: string | null
+        }
+        Relationships: []
+      }
+      agency_portfolio: {
+        Row: {
+          id: string
+          title: string
+          client: string | null
+          image_url: string | null
+          link: string | null
+          description: string | null
+          sort: number
+          visible: boolean
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          title: string
+          client?: string | null
+          image_url?: string | null
+          link?: string | null
+          description?: string | null
+          sort?: number
+          visible?: boolean
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          title?: string
+          client?: string | null
+          image_url?: string | null
+          link?: string | null
+          description?: string | null
+          sort?: number
+          visible?: boolean
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string | null
+          text: string
+          read: boolean | null
+          created_at: string | null
+          link: string | null
+          action_url: string | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          text: string
+          read?: boolean | null
+          created_at?: string | null
+          link?: string | null
+          action_url?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          text?: string
+          read?: boolean | null
+          created_at?: string | null
+          link?: string | null
+          action_url?: string | null
+        }
+        Relationships: []
+      }
+      password_reset_logs: {
+        Row: {
+          id: string
+          email: string
+          user_id: string | null
+          created_at: string | null
+          completed_at: string | null
+          status: string
+          ip: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          id?: string
+          email: string
+          user_id?: string | null
+          created_at?: string | null
+          completed_at?: string | null
+          status?: string
+          ip?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          id?: string
+          email?: string
+          user_id?: string | null
+          created_at?: string | null
+          completed_at?: string | null
+          status?: string
+          ip?: string | null
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
+      skill_settings: {
+        Row: {
+          skill_key: string
+          name: string
+          reg_open: boolean
+          available: boolean
+          sort_order: number
+          whatsapp_url: string | null
+          suffix: string | null
+          snippet: string | null
+          icon: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          skill_key: string
+          name: string
+          reg_open?: boolean
+          available?: boolean
+          sort_order?: number
+          whatsapp_url?: string | null
+          suffix?: string | null
+          snippet?: string | null
+          icon?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          skill_key?: string
+          name?: string
+          reg_open?: boolean
+          available?: boolean
+          sort_order?: number
+          whatsapp_url?: string | null
+          suffix?: string | null
+          snippet?: string | null
+          icon?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      site_settings: {
+        Row: {
+          key: string
+          value: Json
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          key: string
+          value: Json
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          key?: string
+          value?: Json
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      activity_feed: {
+        Row: {
+          id: string
+          source_activity_id: string
+          action: string
+          message: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          source_activity_id: string
+          action: string
+          message: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          source_activity_id?: string
+          action?: string
+          message?: string
+          created_at?: string
         }
         Relationships: []
       }
@@ -870,6 +1098,16 @@ export type Database = {
         Args: { user_uuid: string }
         Returns: boolean
       }
+      auto_mark_live_attendance: {
+        Args: {
+          p_user_id: string
+          p_kr8_id: string
+          p_live_room_id: string
+          p_live_purpose: string
+          p_type: string
+        }
+        Returns: string
+      }
       verify_certificate_public: {
         Args: { cert_code: string }
         Returns: {
@@ -896,6 +1134,59 @@ export type Database = {
           cert_tier: string
           joined: string
         }[]
+      }
+      get_unified_leaderboard: {
+        Args: { limit_n?: number }
+        Returns: {
+          kr8_id: string
+          name: string
+          skill: string | null
+          total_points: number
+          points: number
+          attendance_accepted: number
+          submissions: number
+          referrals: number
+          cert_tier: string | null
+          graduated: boolean
+          double_skill: boolean
+          avatar: string | null
+          graduation_score: number
+          graduation_comment: string | null
+          created_at: string | null
+        }[]
+      }
+      get_public_profile_verification: {
+        Args: { lookup_id: string }
+        Returns: {
+          kr8_id: string
+          name: string
+          skill: string | null
+          graduated: boolean
+          cert_tier: string | null
+          joined: string | null
+          total_points: number
+          points: number
+          attendance_accepted: number
+          submissions: number
+          referrals: number
+          double_skill: boolean
+          graduation_score: number
+          graduation_comment: string | null
+          avatar: string | null
+        }[]
+      }
+      password_reset_status: {
+        Args: { p_email: string }
+        Returns: {
+          allowed: boolean
+          next_allowed_at: string | null
+          last_reset_at: string | null
+          reason: string
+        }[]
+      }
+      log_password_reset: {
+        Args: { p_email: string; p_user_id?: string | null }
+        Returns: string
       }
     }
     Enums: {

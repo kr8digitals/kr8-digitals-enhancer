@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect } from "react";
 import { Outlet, useLocation } from "../router-shim";
 import Navbar from "./Navbar";
@@ -6,6 +5,7 @@ import { logActivity } from "../lib/activityLog";
 import Footer from "./Footer";
 import SiteLiveBanner from "./SiteLiveBanner";
 import FollowPopup from "./FollowPopup";
+import KR8AIFloating from "./KR8AIFloating";
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -25,6 +25,7 @@ export default function Layout() {
 
       <Footer />
       <FollowPopup />
+      <KR8AIFloating />
     </div>
   );
 }

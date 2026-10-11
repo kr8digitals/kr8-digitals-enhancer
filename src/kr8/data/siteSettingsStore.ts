@@ -22,8 +22,8 @@ const DEFAULTS: Record<SiteSettingKey, any> = {
     { key: "facebook", label: "Facebook", href: "https://www.facebook.com/share/19FLQJ8bok/", icon: "facebook", enabled: true },
     { key: "x", label: "X", href: "https://x.com/kr8digitals", icon: "x", enabled: true },
   ],
-  tribe_whatsapp: "https://chat.whatsapp.com/DgnBOEd5CfMHV8CTWgPNLH",
-  waitlist_whatsapp: "https://chat.whatsapp.com/DgnBOEd5CfMHV8CTWgPNLH",
+  tribe_whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU",
+  waitlist_whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU",
   announcement_bar: { on: true, message: "KR8 Cohort Open - Registration Live!" },
   payment: { account: "8166552758", bank: "OPay", name: "Kenneth Timothy", advancedPrice: "35000" },
 };

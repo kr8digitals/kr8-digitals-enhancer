@@ -175,10 +175,10 @@ export default function Navbar() {
                     const generalNotifs = notifications.map((n) => ({
                       ...n,
                       isGraduation: false,
-                      read: true,
+                      read: n.read ?? false,
                     }));
                     const allDisplayNotifs = [...studentNotifs, ...generalNotifs];
-                    const totalBadgeCount = unreadStudentCount + notifications.length;
+                    const totalBadgeCount = unreadStudentCount + notifications.filter((n) => !n.read).length;
 
                     return (
                       <>
@@ -222,6 +222,25 @@ export default function Navbar() {
                                     }`}
                                   >
                                     <p className="leading-relaxed font-medium">{n.text}</p>
+                                    {(n as any).link && /^https?:\/\//i.test((n as any).link) && (
+                                      <a
+                                        href={(n as any).link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-1 inline-flex text-[11px] font-bold text-emerald-300 hover:text-white underline underline-offset-2"
+                                      >
+                                        {(n as any).link.includes("whatsapp.com") ? "Join WhatsApp Group →" : "Open link →"}
+                                      </a>
+                                    )}
+                                    {(n as any).link && (n as any).link.startsWith("/") && (
+                                      <Link
+                                        to={(n as any).link}
+                                        onClick={() => setBell(false)}
+                                        className="mt-1 inline-flex text-[11px] font-bold text-pink-300 hover:text-white underline underline-offset-2"
+                                      >
+                                        Open →
+                                      </Link>
+                                    )}
                                     {n.isGraduation && (
                                       <Link
                                         to="/academy"

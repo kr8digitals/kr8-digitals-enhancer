@@ -40,7 +40,7 @@ const DEFAULT_FOUNDERS: FounderProfile[] = [
   { key: "daniel", name: "Daniel (Creative Expression)", role: "Co-Founder · COO · Video Editing & Animation", bio: "Daniel heads up Video Editing & Animation at KR8 Digitals, running his own studio, Creative Expression. From raw footage to polished, scroll-stopping content, he teaches students to edit with intention — not just software skills.", photo: INSTRUCTOR_PHOTOS.daniel },
 ];
 
-const FOUNDERS_KEY = "kr8_founders_v1";
+const FOUNDERS_KEY = "kr8_founders_v2";
 export function getFounders(): FounderProfile[] {
   return load(FOUNDERS_KEY, DEFAULT_FOUNDERS);
 }
@@ -82,7 +82,7 @@ const DEFAULT_TEAM: TeamProfile[] = [
     photo: "/team/covenant.png",
   },
 ];
-const TEAM_KEY = "kr8_team_v2";
+const TEAM_KEY = "kr8_team_v3";
 export function getTeam(): TeamProfile[] { return load(TEAM_KEY, DEFAULT_TEAM); }
 export function saveTeam(team: TeamProfile[]) {
   save(TEAM_KEY, team);
@@ -97,7 +97,7 @@ export const DEFAULT_SKILLS: Skill[] = [
     key: "graphic",
     name: "Graphic Design",
     suffix: "GDVFD",
-    whatsapp: "https://chat.whatsapp.com/G5mSP8JeelfELvnljpgSJ8?s=cl&p=a&mlu=4&ilr=4",
+    whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
     available: true,
     regOpen: true,
     snippet: "An 8-week programme taking complete beginners from zero design knowledge to a professional portfolio — covering design fundamentals, flyer design, branding & identity, advanced photo manipulation, and responsible AI-assisted design.",
@@ -110,7 +110,7 @@ export const DEFAULT_SKILLS: Skill[] = [
     key: "video",
     name: "Video Editing & Animation",
     suffix: "VEVFD",
-    whatsapp: "https://chat.whatsapp.com/GYVKMA6CLPC2mnG356u8jT?s=cl&p=a&mlu=4&ilr=4",
+    whatsapp: "https://chat.whatsapp.com/C9IyCVi8pWMJJUsErJhQ0M?s=cl&p=a&mlu=4&ilr=4",
     available: true,
     regOpen: true,
     snippet: "An 8-week programme covering both professional video editing (short-form, viral, raw footage to polish) and animation (3D, motion graphics, whiteboard, faceless content, AI-assisted ad videos).",
@@ -153,7 +153,7 @@ export const DEFAULT_SKILLS: Skill[] = [
     key: "content_creation",
     name: "Content Creation",
     suffix: "CCVFD",
-    whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz?s=cl&p=a&mlu=4&ilr=4",
+    whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
     available: true,
     regOpen: true,
     snippet: "An 8-week creator programme taking you from zero to a high-retention creator — covering smartphone cinematography, mobile lighting & audio, CapCut editing, Canva visual design, AI B-roll & ideation, short-form vs long-form architecture, personal branding, and creator media kits.",
@@ -166,7 +166,7 @@ export const DEFAULT_SKILLS: Skill[] = [
     key: "smm",
     name: "Social Media Management",
     suffix: "SMMVFD",
-    whatsapp: "https://chat.whatsapp.com/KRnuYK0hIhh0lobi7Tl7Kz?s=cl&p=a&mlu=4&ilr=4",
+    whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU?s=cl&p=a&mlu=4&ilr=4",
     available: true,
     regOpen: true,
     snippet: "An 8-week business programme training you to manage and scale brand pages professionally — covering social SEO & algorithm mechanics, 30-day editorial calendars, persuasive social copywriting, community management & lead nurture, analytics & ROI reporting, pricing, contracts, and client pitching.",
@@ -179,7 +179,7 @@ export const DEFAULT_SKILLS: Skill[] = [
     key: "marketing",
     name: "Digital Marketing",
     suffix: "DMVFD",
-    whatsapp: "https://chat.whatsapp.com/Fah586y8c26KkUfRhAe8i6?s=cl&p=a&mlu=4&ilr=4",
+    whatsapp: "https://chat.whatsapp.com/EqdAOw1TxiM7KqTB5EXh8v?s=cl&p=a&mlu=4&ilr=4",
     available: true,
     regOpen: true,
     snippet: "An 8-week programme built around real, low-to-no-capital income tracks: China Importation, Affiliate Marketing, and Amazon Bounty Programmes — students graduate having completed real deliverables, not just theory.",
@@ -268,11 +268,11 @@ export const CERTIFICATION_CRITERIA: Record<string, string> = {
   marketing: "≥80% live session attendance · real deliverables completed in ≥2 of the 3 final project tracks · a working 1688 account OR live/approved affiliate account OR active bounty promotion (matching chosen tracks) · passing feedback in ≥2 Thursday review sessions · ≥3 Mindset Shift sessions + 1 Monthly Hangout attended · demonstrated honest, professional communication with customers/suppliers.",
 };
 
-const CUSTOM_SKILLS_KEY = "kr8_custom_skills_v3";
-const SKILL_SETTINGS_KEY = "kr8_skill_settings_v3";
+const CUSTOM_SKILLS_KEY = "kr8_custom_skills_v4";
+const SKILL_SETTINGS_KEY = "kr8_skill_settings_v4";
 const WAITLIST_WHATSAPP_KEY = "kr8_waitlist_whatsapp_url_v1";
 const DYNAMIC_CURRICULA_KEY = "kr8_dynamic_curricula_v1";
-export const DEFAULT_WAITLIST_WHATSAPP = "https://chat.whatsapp.com/G5mSP8JeelfELvnljpgSJ8";
+export const DEFAULT_WAITLIST_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU";
 
 export function getDynamicCurricula(): Record<string, Week[]> {
   return load<Record<string, Week[]>>(DYNAMIC_CURRICULA_KEY, {});
@@ -361,7 +361,7 @@ export function getSkill(key?: string): Skill | undefined {
       key: "content",
       name: "Content Creation & Social Media Management",
       suffix: "CCSMVFD",
-      whatsapp: "https://chat.whatsapp.com/G5mSP8JeelfELvnljpgSJ8",
+      whatsapp: "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU",
       available: false,
       regOpen: false,
       snippet: "Comprehensive combined track covering content creation and social media management.",
@@ -828,7 +828,7 @@ function kr8id(name: string, skill: string, serial: number): string {
 }
 
 // v3 is the durable account namespace.
-const ACCOUNT_STORAGE_KEY = "kr8_accounts_v3";
+const ACCOUNT_STORAGE_KEY = "kr8_accounts_v4_fresh_start";
 const FEED_STORAGE_KEY = "kr8_feed_v3";
 
 const DEFAULT_FOUNDER_ACCOUNT: Account = {
@@ -3212,10 +3212,25 @@ export const PORTFOLIO = [
     showPrice: false,
     img: "/portfolio/afristem_hero.jpg",
     domain: "afristemglobal.org",
+    previewUrl: "https://afristemglobal.org",
     placeholder: false,
   },
   {
     id: "p2",
+    title: "Prime STEM Nigeria",
+    service: "Website Development",
+    client: "Prime STEM Nigeria",
+    description: "Robotics and STEM initiative empowering Nigerian youth with hands-on coding and technology education — primestemnigeria.afristemglobal.org built by KR8 Digitals.",
+    link: "https://primestemnigeria.afristemglobal.org",
+    price: "",
+    showPrice: false,
+    img: "/portfolio/afristem_hero.jpg",
+    domain: "primestemnigeria.afristemglobal.org",
+    previewUrl: "https://primestemnigeria.afristemglobal.org",
+    placeholder: false,
+  },
+  {
+    id: "p3",
     title: "Chi-Tom Rapha Hospital & Maternity",
     service: "Website Development",
     client: "Chi-Tom Rapha Hospital and Maternity",
@@ -3225,27 +3240,29 @@ export const PORTFOLIO = [
     showPrice: false,
     img: "/portfolio/chitom_preview.png",
     domain: "chitomraphahospital.com",
-    placeholder: false,
-  },
-  {
-    id: "p3",
-    title: "Prime STEM Nigeria",
-    service: "Website Development",
-    client: "Prime STEM Nigeria",
-    description: "Robotics and STEM initiative empowering Nigerian youth with hands-on coding and technology education, powered by KR8 Digitals web design.",
-    link: "https://primestem.com.ng",
-    price: "",
-    showPrice: false,
-    img: "/portfolio/afristem_hero.jpg",
-    domain: "primestem.com.ng",
+    previewUrl: "https://chitomraphahospital.com",
     placeholder: false,
   },
   {
     id: "p4",
-    title: "City Fashion Stores",
-    service: "Brand Design",
-    client: "City Fashion Stores",
-    description: "Complete visual brand positioning online, advertising graphics, and social media creative suite.",
+    title: "Consistency Drill",
+    service: "Website Development",
+    client: "Consistency Drill",
+    description: "Personal development and consistency tracking platform — website development by KR8 Digitals, helping users build habits and stay accountable.",
+    link: "https://consistencydrill.com",
+    price: "",
+    showPrice: false,
+    img: "/portfolio/afristem_hero.jpg",
+    domain: "consistencydrill.com",
+    previewUrl: "https://consistencydrill.com",
+    placeholder: false,
+  },
+  {
+    id: "p5",
+    title: "City Fashion Store",
+    service: "Complete Branding",
+    client: "City Fashion Store",
+    description: "Complete branding, visual identity, advertising graphics, and social media creative suite for fashion retail — from logo to storefront to campaign.",
     link: "/agency",
     price: "",
     showPrice: false,
@@ -3254,7 +3271,7 @@ export const PORTFOLIO = [
     placeholder: false,
   },
   {
-    id: "p5",
+    id: "p6",
     title: "Everything for Smart Living",
     service: "Video Editing",
     client: "Everything for Smart Living",
@@ -3266,7 +3283,7 @@ export const PORTFOLIO = [
     placeholder: false,
   },
   {
-    id: "p6",
+    id: "p7",
     title: "KR8 Academy Platform",
     service: "Web Engineering",
     client: "KR8 Digitals",
@@ -3276,20 +3293,27 @@ export const PORTFOLIO = [
     showPrice: false,
     img: "/portfolio/kr8_academy.jpg",
     domain: "kr8digitals.com",
+    previewUrl: "https://www.kr8digitals.com/academy",
     placeholder: false,
   },
 ];
 
 export const FULL_PORTFOLIO_LINK = "/agency";
-export const TRIBE_WHATSAPP = "https://chat.whatsapp.com/DgnBOEd5CfMHV8CTWgPNLH";
+export const TRIBE_WHATSAPP = "https://chat.whatsapp.com/KdzTcSlrGlp8CQcbxFuUgU";
 export function getTribeWhatsApp() {
   return load("kr8_tribe_link_v1", TRIBE_WHATSAPP);
 }
 export function getPortfolio() {
-  return load("kr8_portfolio_v3", PORTFOLIO);
+  const cached = load("kr8_portfolio_v4", null as any);
+  if (cached && Array.isArray(cached) && cached.length >= 7 && cached.some((c:any)=>c.previewUrl)) return cached;
+  // migrate/clear old v3 cache that lacks live previews
+  if (typeof window !== "undefined") {
+    try { localStorage.removeItem("kr8_portfolio_v3"); } catch {}
+  }
+  return load("kr8_portfolio_v4", PORTFOLIO);
 }
 export function savePortfolio(items: typeof PORTFOLIO) {
-  save("kr8_portfolio_v3", items);
+  save("kr8_portfolio_v4", items);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("kr8:portfolio-updated"));
     window.dispatchEvent(new Event("storage"));
